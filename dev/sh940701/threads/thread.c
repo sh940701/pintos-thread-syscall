@@ -94,7 +94,7 @@ static uint64_t gdt[3] = { 0, 0x00af9a000000ffff, 0x00cf92000000ffff };
    finishes. */
 void
 thread_init (void) {
-	ASSERT (intr_get_level () == INTR_OFF);
+	ASSERT (intr_get_level () == INTR_OFF); // 이 시점에서 interrupt 상태는 disable 되어있어야 한다.
 
 	/* Reload the temporal gdt for the kernel
 	 * This gdt does not include the user context.
@@ -106,14 +106,14 @@ thread_init (void) {
 	lgdt (&gdt_ds);
 
 	/* Init the globla thread context */
-	lock_init (&tid_lock);
-	list_init (&ready_list);
-	list_init (&destruction_req);
+	lock_init (&tid_lock); // lock 은 semaphore 로 구성되어있다. 여기서 sema_value 를 1 로 하여 진입가능 상태로 만들어준다.
+	list_init (&ready_list); // ready 를 위한 list 를 만들어준다. 연결리스트로 구성됨
+	list_init (&destruction_req); // destruction 을 위한 list 를 만들어준다. 연결리스트로 구성됨
 
 	/* Set up a thread structure for the running thread. */
-	initial_thread = running_thread ();
-	init_thread (initial_thread, "main", PRI_DEFAULT);
-	initial_thread->status = THREAD_RUNNING;
+	initial_thread = running_thread (); // 실행중인 thread 반환. 여기서는 이 프로그램의 제어에 해당하는 main thread 가 아닐까?
+	init_thread (initial_thread, "main", PRI_DEFAULT); // main 이라는 이름으로 thread 를 init 한다. 우선순위는 default 로
+	initial_thread->status = THREAD_RUNNING; // thread 상태 running 으로 변경. 
 	initial_thread->tid = allocate_tid ();
 }
 
@@ -122,15 +122,15 @@ thread_init (void) {
 void
 thread_start (void) {
 	/* Create the idle thread. */
-	struct semaphore idle_started;
-	sema_init (&idle_started, 0);
+	struct semaphore idle_started; // IDLE: 프로세스가 실행하고 있지 않은 상태
+	sema_init (&idle_started, 0); // semaphore 생성, value 를 0으로 해놓았기 때문에 현재는 잠긴 상태이다.
 	thread_create ("idle", PRI_MIN, idle, &idle_started);
 
 	/* Start preemptive thread scheduling. */
-	intr_enable ();
+	intr_enable (); // 선점 스케줄링을 허용했기 때문에 이때부터 idle 함수 실행이 가용하다.
 
 	/* Wait for the idle thread to initialize idle_thread. */
-	sema_down (&idle_started);
+	sema_down (&idle_started); // 작업을 하러 들어가고 키를 잠금 -> 이 context 에서는 생성시 sema 를 0으로 초기화했기 때문에, idle 함수에서 sema_up 을 실행한 이후 sema_down 이 끝난다.
 }
 
 /* Called by the timer interrupt handler at each timer tick.
@@ -185,18 +185,18 @@ thread_create (const char *name, int priority,
 	ASSERT (function != NULL);
 
 	/* Allocate thread. */
-	t = palloc_get_page (PAL_ZERO);
+	t = palloc_get_page (PAL_ZERO); // thread 생성을 위한 page allocation
 	if (t == NULL)
 		return TID_ERROR;
 
 	/* Initialize thread. */
-	init_thread (t, name, priority);
-	tid = t->tid = allocate_tid ();
+	init_thread (t, name, priority); // 이름: name, 중요도: priority, status: THREAD_BLOCKED 인 thread 생성
+	tid = t->tid = allocate_tid (); // tid 생성 및 thread 에 할당
 
 	/* Call the kernel_thread if it scheduled.
 	 * Note) rdi is 1st argument, and rsi is 2nd argument. */
-	t->tf.rip = (uintptr_t) kernel_thread;
-	t->tf.R.rdi = (uint64_t) function;
+	t->tf.rip = (uintptr_t) kernel_thread; // 2nd arg 를 인자로 하여 1st arg(함수) 를 실행해주는 역할을 함
+	t->tf.R.rdi = (uint64_t) function; 
 	t->tf.R.rsi = (uint64_t) aux;
 	t->tf.ds = SEL_KDSEG;
 	t->tf.es = SEL_KDSEG;
@@ -205,7 +205,7 @@ thread_create (const char *name, int priority,
 	t->tf.eflags = FLAG_IF;
 
 	/* Add to run queue. */
-	thread_unblock (t);
+	thread_unblock (t); // thread 를 ready_list 에 넣고 READY 상태로 업데이트
 
 	return tid;
 }
@@ -238,11 +238,11 @@ thread_unblock (struct thread *t) {
 
 	ASSERT (is_thread (t));
 
-	old_level = intr_disable ();
+	old_level = intr_disable (); // atomic 한 실행을 위해 interrupt 비활성화
 	ASSERT (t->status == THREAD_BLOCKED);
-	list_push_back (&ready_list, &t->elem);
-	t->status = THREAD_READY;
-	intr_set_level (old_level);
+	list_push_back (&ready_list, &t->elem); // thread 를 ready_list 에 넣어줌 -> 마지막에 넣어줌
+	t->status = THREAD_READY; // thread 의 status 를 BLOCKED -> READY 로 변경해줌
+	intr_set_level (old_level); // interrupt 다시 활성화
 }
 
 /* Returns the name of the running thread. */
@@ -304,6 +304,7 @@ thread_yield (void) {
 	old_level = intr_disable ();
 	if (curr != idle_thread)
 		list_push_back (&ready_list, &curr->elem);
+		
 	do_schedule (THREAD_READY);
 	intr_set_level (old_level);
 }
@@ -360,8 +361,8 @@ static void
 idle (void *idle_started_ UNUSED) {
 	struct semaphore *idle_started = idle_started_;
 
-	idle_thread = thread_current ();
-	sema_up (idle_started);
+	idle_thread = thread_current (); // 현재 이 idle 함수를 실행하고 있는 thread == idle thread
+	sema_up (idle_started); // 작업을 마치고, 진입 가능 상태로 바꾸고 나감
 
 	for (;;) {
 		/* Let someone else run. */
@@ -397,6 +398,7 @@ kernel_thread (thread_func *function, void *aux) {
 
 /* Does basic initialization of T as a blocked thread named
    NAME. */
+// init_thread 함수는 언제나 BLOCKED 상태인 thread 를 만들어서 반환함
 static void
 init_thread (struct thread *t, const char *name, int priority) {
 	ASSERT (t != NULL);
@@ -404,10 +406,10 @@ init_thread (struct thread *t, const char *name, int priority) {
 	ASSERT (name != NULL);
 
 	memset (t, 0, sizeof *t);
-	t->status = THREAD_BLOCKED;
-	strlcpy (t->name, name, sizeof t->name);
+	t->status = THREAD_BLOCKED; // thread 의 초기 상태는 BLOCKED
+	strlcpy (t->name, name, sizeof t->name); // thread 의 이름 설정
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
-	t->priority = priority;
+	t->priority = priority; // thread 의 우선순위 설정
 	t->magic = THREAD_MAGIC;
 }
 
@@ -418,10 +420,10 @@ init_thread (struct thread *t, const char *name, int priority) {
    idle_thread. */
 static struct thread *
 next_thread_to_run (void) {
-	if (list_empty (&ready_list))
+	if (list_empty (&ready_list)) // ready_list 가 비어있으면, idle_thread 반환
 		return idle_thread;
 	else
-		return list_entry (list_pop_front (&ready_list), struct thread, elem);
+		return list_entry (list_pop_front (&ready_list), struct thread, elem); // list 의 첫번째 thread 구조체를 반환
 }
 
 /* Use iretq to launch the thread */
@@ -550,7 +552,7 @@ schedule (void) {
 	next->status = THREAD_RUNNING;
 
 	/* Start new time slice. */
-	thread_ticks = 0;
+	thread_ticks = 0; 
 
 #ifdef USERPROG
 	/* Activate the new address space. */
@@ -582,7 +584,7 @@ allocate_tid (void) {
 	static tid_t next_tid = 1;
 	tid_t tid;
 
-	lock_acquire (&tid_lock);
+	lock_acquire (&tid_lock); // thread 에 할당할 id 는 shared memory 이므로 동시접근을 위해 lock 걸어줌
 	tid = next_tid++;
 	lock_release (&tid_lock);
 

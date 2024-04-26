@@ -72,25 +72,25 @@ test_sleep (int thread_cnt, int iterations)
     PANIC ("couldn't allocate memory for test");
 
   /* Initialize test. */
-  test.start = timer_ticks () + 100;
+  test.start = timer_ticks () + 100; // test 의 시작시간을 (현재 시간 + 100) 으로 초기화
   test.iterations = iterations;
-  lock_init (&test.output_lock);
+  lock_init (&test.output_lock); // test.output_lock 에 대한 semaphore 생성
   test.output_pos = output;
 
   /* Start threads. */
   ASSERT (output != NULL);
   for (i = 0; i < thread_cnt; i++)
     {
-      struct sleep_thread *t = threads + i;
+      struct sleep_thread *t = threads + i; // thread 주소값 할당
       char name[16];
       
-      t->test = &test;
-      t->id = i;
-      t->duration = (i + 1) * 10;
-      t->iterations = 0;
+      t->test = &test; // thread 에 test 할당
+      t->id = i; // thread id 생성
+      t->duration = (i + 1) * 10; // 각 thread 의 duration 은 10, 20, ... , 50 할당
+      t->iterations = 0; // 이 부분에서 정확히 왜 0 을 할당해주는지 확인 필요
 
       snprintf (name, sizeof name, "thread %d", i);
-      thread_create (name, PRI_DEFAULT, sleeper, t);
+      thread_create (name, PRI_DEFAULT, sleeper, t); // 
     }
   
   /* Wait long enough for all the threads to finish. */
@@ -143,9 +143,9 @@ sleeper (void *t_)
 
   for (i = 1; i <= test->iterations; i++) 
     {
-      int64_t sleep_until = test->start + i * t->duration;
+      int64_t sleep_until = test->start + i * t->duration; // ex) 133 + (1 * 10), (2 * 10), (3 * 10) ...
       timer_sleep (sleep_until - timer_ticks ());
-      lock_acquire (&test->output_lock);
+      lock_acquire (&test->output_lock); // output 을 생성하기 위해 lock 을 걸어줌
       *test->output_pos++ = t->id;
       lock_release (&test->output_lock);
     }

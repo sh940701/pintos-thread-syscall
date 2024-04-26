@@ -45,8 +45,8 @@ void
 sema_init (struct semaphore *sema, unsigned value) {
 	ASSERT (sema != NULL);
 
-	sema->value = value;
-	list_init (&sema->waiters);
+	sema->value = value; //  semaphore 값 초기화
+	list_init (&sema->waiters); // semaphore 와 함께 관리될 list init. waiters: wating threads
 }
 
 /* Down or "P" operation on a semaphore.  Waits for SEMA's value

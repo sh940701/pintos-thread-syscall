@@ -79,7 +79,7 @@ main (void) {
 
 	/* Initialize ourselves as a thread so we can use locks,
 	   then enable console locking. */
-	thread_init ();
+	thread_init (); // 메인 스레드 생성 및 초기화
 	console_init ();
 
 	/* Initialize memory system. */
