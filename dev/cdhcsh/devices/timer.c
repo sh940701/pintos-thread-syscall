@@ -91,10 +91,10 @@ timer_elapsed(int64_t then)
 }
 
 /* Suspends execution for approximately TICKS timer ticks. */
-void timer_sleep(int64_t ticks)
+void timer_sleep(int64_t ticks) // ticks이 경과할때 까지 실행 중지
 {
 	int64_t start = timer_ticks();
-
+	printf("%d : %d \n", thread_current()->tid, ticks);
 	ASSERT(intr_get_level() == INTR_ON);
 	while (timer_elapsed(start) < ticks)
 		thread_yield();
