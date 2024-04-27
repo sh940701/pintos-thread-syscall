@@ -87,10 +87,10 @@ test_sleep (int thread_cnt, int iterations)
       t->test = &test; // thread 에 test 할당
       t->id = i; // thread id 생성
       t->duration = (i + 1) * 10; // 각 thread 의 duration 은 10, 20, ... , 50 할당
-      t->iterations = 0; // 이 부분에서 정확히 왜 0 을 할당해주는지 확인 필요
+      t->iterations = 0;
 
       snprintf (name, sizeof name, "thread %d", i);
-      thread_create (name, PRI_DEFAULT, sleeper, t); // 
+      thread_create (name, PRI_DEFAULT, sleeper, t);
     }
   
   /* Wait long enough for all the threads to finish. */
@@ -111,10 +111,10 @@ test_sleep (int thread_cnt, int iterations)
       t = threads + *op;
 
       new_prod = ++t->iterations * t->duration;
-        
+
       msg ("thread %d: duration=%d, iteration=%d, product=%d",
            t->id, t->duration, t->iterations, new_prod);
-      
+
       if (new_prod >= product)
         product = new_prod;
       else
@@ -127,7 +127,7 @@ test_sleep (int thread_cnt, int iterations)
     if (threads[i].iterations != iterations)
       fail ("thread %d woke up %d times instead of %d",
             i, threads[i].iterations, iterations);
-  
+
   lock_release (&test.output_lock);
   free (output);
   free (threads);
