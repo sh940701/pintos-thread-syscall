@@ -96,9 +96,12 @@ timer_elapsed(int64_t then)
 /* Suspends execution for approximately TICKS timer ticks. */
 void timer_sleep(int64_t ticks)
 {
+	struct thread *curr = thread_current(); // 현재 실행하고 있는 thread
+
 	// 함수를 호출하는 시간을 start 에 기록 ex) start: 0
 	int64_t start = timer_ticks();
 
+	curr->wakeup_time = ticks + start;
 	// timer_ticks() 에서
 	// 1. 인터럽트 disable
 	// 2. 시간 GET
@@ -109,8 +112,14 @@ void timer_sleep(int64_t ticks)
 	// 현재 timer_sleep 함수가 시작된 후 지난 시간과, 인자로 받은 ticks 간의 대소관계를 계속 확인
 	// 만약 ticks 이상의 시간이 지났으면 함수 종료
 	// 만약 아직 ticks 시간에 도달하지 못했다면, thread_yield() 를 호출하여 다른 thread 에게 cpu 자원을 양보한다.
-	while (timer_elapsed(start) < ticks)
-		thread_yield();
+	// while (timer_elapsed(start) < ticks)
+	// 	thread_yield();
+
+	// 이 thread 가 실행된 시점이 ticks 이전이라면
+	if (timer_elapsed(start) < ticks)
+	{
+		thread_sleep();
+	}
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -181,9 +190,9 @@ busy_wait(int64_t loops)
 
 /* Sleep for approximately NUM/DENOM seconds. */
 // 주어진 시간(num, denom) 만큼 대기하는 함수
-// timer tick 은 일반적으로 0 이상의 정수값이다. 
+// timer tick 은 일반적으로 0 이상의 정수값이다.
 // timer tick 이 정확히 0 이라면, 그 순간 바로 busy_wait 을 활성화 하여 최대한 정확한 시간을 계산한다.
-// timer tick 이 1 이상일 시, 
+// timer tick 이 1 이상일 시,
 static void
 real_time_sleep(int64_t num, int32_t denom)
 {
