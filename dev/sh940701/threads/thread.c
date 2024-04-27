@@ -27,6 +27,7 @@
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
+static struct list sleep_list; // 자고 있는(BLOCKED 된) thread 들을 저장해 줄 list
 
 /* Idle thread. */
 static struct thread *idle_thread;
@@ -108,13 +109,14 @@ thread_init (void) {
 	/* Init the globla thread context */
 	lock_init (&tid_lock); // lock 은 semaphore 로 구성되어있다. 여기서 sema_value 를 1 로 하여 진입가능 상태로 만들어준다.
 	list_init (&ready_list); // ready 를 위한 list 를 만들어준다. 연결리스트로 구성됨
+	list_init (&sleep_list); // sleep 을 위한 list 를 만들어준다. 연결리스트로 구성됨
 	list_init (&destruction_req); // destruction 을 위한 list 를 만들어준다. 연결리스트로 구성됨
 
 	/* Set up a thread structure for the running thread. */
 	initial_thread = running_thread (); // 실행중인 thread 반환. 여기서는 이 프로그램의 제어에 해당하는 main thread 가 아닐까?
 	init_thread (initial_thread, "main", PRI_DEFAULT); // main 이라는 이름으로 thread 를 init 한다. 우선순위는 default 로
 	initial_thread->status = THREAD_RUNNING; // thread 상태 running 으로 변경. 
-	initial_thread->tid = allocate_tid ();
+	initial_thread->tid = allocate_tid (); // ID 할당. main 은 1
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -137,7 +139,36 @@ thread_start (void) {
    Thus, this function runs in an external interrupt context. */
 void
 thread_tick (void) {
+	ASSERT(intr_context);
+	int64_t current_time = timer_ticks();
 	struct thread *t = thread_current ();
+
+	struct list_elm *p = list_head(&sleep_list);
+	struct list_elm *tail = list_tail(&sleep_list);
+
+	while (list_next(p) != tail) {
+		struct thread *t = list_entry(list_next(p), struct thread, elem);
+		if (t->wakeup_time <= current_time) {
+			list_remove(list_next(p));
+			thread_unblock(t);
+			continue;
+		}
+		p = list_next(p);
+	}
+
+
+
+	// if (&sleep_list.head) {
+	// 	struct elem sleeped_thread;
+
+	// 	while (sleeped_thread != &sleep_list.tail) {
+	// 	 	struct thread *sleeped_thread = list_entry((sleep_list.head.next), struct thread, elem);
+	// 		if (sleeped_thread->wakeup_time <= current_time) {
+	// 			thread_unblock(sleeped_thread);
+	// 			list_remove(sleeped_thread->elem);
+	// 		}
+	// 	}
+	// }
 
 	/* Update statistics. */
 	if (t == idle_thread)
@@ -296,16 +327,31 @@ thread_exit (void) {
    may be scheduled again immediately at the scheduler's whim. */
 void
 thread_yield (void) {
-	struct thread *curr = thread_current ();
+	struct thread *curr = thread_current (); // 현재 실행하고 있는 thread
 	enum intr_level old_level;
 
 	ASSERT (!intr_context ());
 
 	old_level = intr_disable ();
 	if (curr != idle_thread)
-		list_push_back (&ready_list, &curr->elem);
+		list_push_back (&ready_list, &curr->elem); // ready_list 의 맨 뒤에 현재 thread 를 넣는다.
 		
 	do_schedule (THREAD_READY);
+	intr_set_level (old_level);
+}
+
+void
+thread_sleep (void) {
+	struct thread *curr = thread_current (); // 현재 실행하고 있는 thread -> sleep 상태로 변경될 thread
+	enum intr_level old_level;
+
+	ASSERT (!intr_context ());
+
+	old_level = intr_disable ();
+	if (curr != idle_thread)
+		list_push_back (&sleep_list, &curr->elem); // sleep_list 의 맨 뒤에 현재 thread 를 넣는다.
+		
+	thread_block();
 	intr_set_level (old_level);
 }
 
@@ -367,7 +413,7 @@ idle (void *idle_started_ UNUSED) {
 	for (;;) {
 		/* Let someone else run. */
 		intr_disable ();
-		thread_block ();
+		thread_block (); // thread block 을 하기 위해서는 interrupt 가 비활성화되어있어야 하기 때문에 intr_disable() 호출
 
 		/* Re-enable interrupts and wait for the next one.
 
@@ -381,7 +427,7 @@ idle (void *idle_started_ UNUSED) {
 
 		   See [IA32-v2a] "HLT", [IA32-v2b] "STI", and [IA32-v3a]
 		   7.11.1 "HLT Instruction". */
-		asm volatile ("sti; hlt" : : : "memory");
+		asm volatile ("sti; hlt" : : : "memory"); // thread 
 	}
 }
 
