@@ -135,6 +135,8 @@ const char *thread_name(void);
 void thread_exit(void) NO_RETURN;
 void thread_yield(void);
 
+/* #2 Priority Scheduling : 현재 실행 중인 쓰레드보다 더 높은 우선순위의 쓰레드가 ready_list에 있다면 양보 */
+void priority_schedule(void);
 int thread_get_priority(void);
 void thread_set_priority(int);
 
