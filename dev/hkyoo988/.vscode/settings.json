@@ -1,0 +1,9 @@
+{
+    "files.associations": {
+        "thread.h": "c",
+        "vaddr.h": "c",
+        "interrupt.h": "c",
+        "palloc.h": "c",
+        "synch.h": "c"
+    }
+}
