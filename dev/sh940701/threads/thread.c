@@ -66,6 +66,7 @@ static tid_t allocate_tid (void);
 
 void test_max_priority (void);
 bool cmp_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+void thread_test_preemption(void);
 
 /* Returns true if T appears to point to a valid thread. */
 #define is_thread(t) ((t) != NULL && (t)->magic == THREAD_MAGIC)
@@ -667,4 +668,10 @@ bool cmp_priority(const struct list_elem *a, const struct list_elem *b, void *au
 		return 1;
 
 	return 0;
+}
+
+void thread_test_preemption(void)
+{
+    if (!list_empty(&ready_list) && thread_current()->priority < list_entry(list_front(&ready_list), struct thread, elem)->priority)
+        thread_yield();
 }

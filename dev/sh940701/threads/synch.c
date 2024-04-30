@@ -32,7 +32,8 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
-bool cmp_sem_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+bool cmp_sem_priority2(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+bool cmp_sem_priority (const struct list_elem *a, const struct list_elem *b, void *aux);
 
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
@@ -68,7 +69,7 @@ sema_down (struct semaphore *sema) {
 
 	old_level = intr_disable ();
 	while (sema->value == 0) {
-		list_insert_ordered (&sema->waiters, &thread_current ()->elem, cmp_sem_priority, NULL);
+		list_insert_ordered (&sema->waiters, &thread_current ()->elem, cmp_sem_priority2, NULL);
 		// list_push_back (&sema->waiters, &thread_current ()->elem);
 		thread_block ();
 	}
@@ -109,17 +110,19 @@ void
 sema_up (struct semaphore *sema) {
 	enum intr_level old_level;
 
-	list_sort(&(sema->waiters), cmp_sem_priority, NULL);
+	list_sort(&(sema->waiters), cmp_sem_priority2, NULL);
 
 	ASSERT (sema != NULL);
 
 	old_level = intr_disable ();
-	if (!list_empty (&sema->waiters))
+	if (!list_empty (&sema->waiters)) {
 		thread_unblock (list_entry (list_pop_front (&sema->waiters),
 					struct thread, elem));
+	}
+
 	sema->value++;
-	intr_set_level (old_level);
-	thread_yield();
+	thread_test_preemption();
+	intr_set_level(old_level);
 }
 
 static void sema_test_helper (void *sema_);
@@ -308,9 +311,11 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED) {
 	ASSERT (!intr_context ());
 	ASSERT (lock_held_by_current_thread (lock));
 
-	if (!list_empty (&cond->waiters))
+	if (!list_empty (&cond->waiters)) {
+		list_sort(&cond->waiters, cmp_sem_priority, 0);
 		sema_up (&list_entry (list_pop_front (&cond->waiters),
 					struct semaphore_elem, elem)->semaphore);
+	}
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by
@@ -328,7 +333,7 @@ cond_broadcast (struct condition *cond, struct lock *lock) {
 		cond_signal (cond, lock);
 }
 
-bool cmp_sem_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
+bool cmp_sem_priority2(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
 	struct thread *t1 = list_entry(a, struct thread, elem);
 	struct thread *t2 = list_entry(b, struct thread, elem);
 
@@ -336,4 +341,16 @@ bool cmp_sem_priority(const struct list_elem *a, const struct list_elem *b, void
 		return 1;
 
 	return 0;
+}
+
+bool cmp_sem_priority (const struct list_elem *a, const struct list_elem *b, void *aux) {
+	struct semaphore_elem *sa = list_entry(a, struct semaphore_elem, elem);
+	struct semaphore_elem *sb = list_entry(b, struct semaphore_elem, elem);
+
+	struct list_elem *sa_e = list_begin(&(sa->semaphore.waiters));
+	struct list_elem *sb_e = list_begin(&(sb->semaphore.waiters));
+
+	struct thread *sa_t = list_entry(sa_e, struct thread, elem);
+	struct thread *sb_t = list_entry(sb_e, struct thread, elem);
+	return (sa_t->priority) > (sb_t->priority);
 }
