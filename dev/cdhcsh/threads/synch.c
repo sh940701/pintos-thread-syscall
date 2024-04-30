@@ -154,21 +154,55 @@ sema_test_helper(void *sema_)
 		sema_up(&sema[1]);
 	}
 }
-
-struct donate_elem
-{
-	struct list_elem elem;
-	struct thread *thread;
-	int priority;
-};
+/* #2 Priority Scheduling : donation_elem 항목의 쓰레드간의 우선순위 비교*/
 static bool compare_donation_priority(const struct list_elem *a, const struct list_elem *b, void *aux)
 {
 	struct thread *a_t = list_entry(a, struct thread, donation_elem);
 	struct thread *b_t = list_entry(b, struct thread, donation_elem);
 	return a_t->priority > b_t->priority;
 }
-static void donate_priority()
+
+/* #2 Priority Scheduling : 현재 쓰레드가 기다리는 lock과 연결된 쓰레드들에게 우선순위 기부*/
+static void donate_priority(void)
 {
+	struct thread *t = thread_current();
+	struct thread *holder = t->wait_on_lock->holder;
+	int count = 0;
+	while (holder != NULL) // chain된 락들을 순회하며 holder들에게 우선순위 기부
+	{
+		holder->priority = t->priority;
+		count++;
+		if (count > 8 || holder->wait_on_lock == NULL) // max depth 8
+			break;
+		holder = holder->wait_on_lock->holder;
+	}
+}
+/* #2 Priority Scheduling : 현재 쓰레드에게 우선순위를 기부한 쓰레드 목록에서 해당 lock을 통해 기부 받은 정보 삭제*/
+static void remove_with_lock(struct lock *lock)
+{
+	struct list *donations = &thread_current()->donations;
+	struct list_elem *donation = list_begin(donations);
+	while (donation != list_tail(donations))
+	{
+		struct thread *t = list_entry(donation, struct thread, donation_elem);
+		if (t->wait_on_lock == lock)
+		{
+			list_remove(donation);
+		}
+		donation = list_next(donation);
+	}
+}
+/* #2 Priority Scheduling : 현재 쓰레드의 우선순위를 가장 높은 기부받은 우선순위로 갱신*/
+void refresh_priority(void)
+{
+	struct thread *t = thread_current();
+	t->priority = t->init_priority;
+	struct list *donations = &t->donations;
+	if (!list_empty(donations))
+	{
+		struct thread *front = list_entry(list_begin(donations), struct thread, donation_elem);
+		t->priority = front->priority;
+	}
 }
 /* LOCK을 초기화합니다. 한 번에 최대 하나의 스레드가 LOCK을 보유할 수 있습니다.
    현재 스레드가 이미 LOCK을 보유하고 있어도 해당 LOCK을 획득하려고 시도하면 "재귀적"이지 않은 것이므로
@@ -186,7 +220,6 @@ void lock_init(struct lock *lock)
 	lock->holder = NULL;
 	sema_init(&lock->semaphore, 1);
 }
-/* #2 Priority Scheduling : 우선순위 */
 /* LOCK을 획득합니다. 필요한 경우 가능할 때까지 대기하여 사용 가능해집니다.
    현재 스레드가 이미 LOCK을 보유하고 있으면 안 됩니다.
 
@@ -240,6 +273,8 @@ void lock_release(struct lock *lock)
 	ASSERT(lock_held_by_current_thread(lock));
 
 	lock->holder = NULL;
+	remove_with_lock(lock);
+	refresh_priority();
 	sema_up(&lock->semaphore);
 }
 
@@ -260,7 +295,7 @@ struct semaphore_elem
 	struct semaphore semaphore; /* This semaphore. */
 };
 
-/* #2 Priority Scheduling : semaphore_elemd의 쓰레드의 우선순위 비교 함수 */
+/* #2 Priority Scheduling : semaphore_elem의 쓰레드의 우선순위 비교 함수 */
 bool compare_sema_priority(const struct list_elem *a,
 						   const struct list_elem *b,
 						   void *aux)

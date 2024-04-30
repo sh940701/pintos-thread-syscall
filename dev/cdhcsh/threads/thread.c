@@ -335,6 +335,9 @@ bool compare_thread_priority(const struct list_elem *a,
 void thread_set_priority(int new_priority)
 {
 	thread_current()->priority = new_priority;
+	thread_current()->init_priority = new_priority;
+
+	refresh_priority();
 	priority_schedule();
 }
 
