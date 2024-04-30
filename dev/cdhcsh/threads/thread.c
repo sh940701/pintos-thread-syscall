@@ -63,9 +63,6 @@ static void do_schedule(int status);
 static void schedule(void);
 static tid_t allocate_tid(void);
 
-static bool compare_priority(const struct list_elem *a,
-							 const struct list_elem *b,
-							 void *aux);
 /* T가 유효한 쓰레드를 가리키는지 여부를 반환합니다. */
 #define is_thread(t) ((t) != NULL && (t)->magic == THREAD_MAGIC)
 
@@ -238,7 +235,7 @@ void thread_unblock(struct thread *t)
 
 	old_level = intr_disable();
 	ASSERT(t->status == THREAD_BLOCKED);
-	list_insert_ordered(&ready_list, &t->elem, compare_priority, NULL);
+	list_insert_ordered(&ready_list, &t->elem, compare_thread_priority, NULL);
 	t->status = THREAD_READY;
 	intr_set_level(old_level);
 }
@@ -305,7 +302,7 @@ void thread_yield(void)
 
 	old_level = intr_disable();
 	if (curr != idle_thread)
-		list_insert_ordered(&ready_list, &curr->elem, compare_priority, NULL); /* #2 Priority Scheduling : 우선순위에 맞춰 삽입*/
+		list_insert_ordered(&ready_list, &curr->elem, compare_thread_priority, NULL); /* #2 Priority Scheduling : 우선순위에 맞춰 삽입*/
 	do_schedule(THREAD_READY);
 	intr_set_level(old_level);
 }
@@ -318,15 +315,13 @@ void priority_schedule(void)
 		struct thread *t = thread_current();
 		struct thread *next = list_entry(list_begin(&ready_list), struct thread, elem);
 		if (t->priority < next->priority)
-		{
 			thread_yield();
-		}
 	}
 	intr_set_level(old_level);
 }
 
 /* #2 Priority Scheduling : 우선순위 비교 함수*/
-static bool compare_priority(const struct list_elem *a,
+bool compare_thread_priority(const struct list_elem *a,
 							 const struct list_elem *b,
 							 void *aux)
 {
@@ -340,6 +335,7 @@ static bool compare_priority(const struct list_elem *a,
 void thread_set_priority(int new_priority)
 {
 	thread_current()->priority = new_priority;
+	priority_schedule();
 }
 
 /* 현재 쓰레드의 우선 순위를 반환합니다. */
@@ -433,6 +429,11 @@ init_thread(struct thread *t, const char *name, int priority)
 	t->tf.rsp = (uint64_t)t + PGSIZE - sizeof(void *);
 	t->priority = priority;
 	t->magic = THREAD_MAGIC;
+
+	/* #2 Priority Scheduling : donation 관련 변수초기화 */
+	list_init(&t->donations);
+	t->init_priority = priority;
+	t->wait_on_lock = NULL;
 }
 
 /* 스케줄할 다음 쓰레드를 선택하고 반환합니다.
