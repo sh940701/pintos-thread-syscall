@@ -42,12 +42,6 @@
    - up or "V": increment the value (and wake up one waiting
    thread, if any). */
 
-// b = prev(a)
-bool sema_compare_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED){
-	
-	return list_entry(a, struct thread, elem)->priority > list_entry(b, struct thread, elem)->priority;
-
-}
 void
 sema_init (struct semaphore *sema, unsigned value) {
 	ASSERT (sema != NULL);
@@ -73,7 +67,7 @@ sema_down (struct semaphore *sema) {
 
 	old_level = intr_disable ();
 	while (sema->value == 0) {
-		list_insert_ordered (&sema->waiters, &thread_current ()->elem, sema_compare_priority, NULL);
+		list_insert_ordered (&sema->waiters, &thread_current ()->elem, compare_elem, NULL);
 		thread_block ();
 	}
 	sema->value--;
@@ -117,11 +111,12 @@ sema_up (struct semaphore *sema) {
 
 	old_level = intr_disable ();
 	if (!list_empty (&sema->waiters)){
-		list_sort(&sema->waiters, sema_compare_priority, NULL);
+		list_sort(&sema->waiters, compare_elem, NULL);
 		thread_unblock (list_entry (list_pop_front (&sema->waiters),
 					struct thread, elem));
 	}
 	sema->value++;
+	test_max_priority();
 	intr_set_level (old_level);
 
 }
@@ -198,8 +193,11 @@ lock_acquire (struct lock *lock) {
 	ASSERT (!intr_context ());
 	ASSERT (!lock_held_by_current_thread (lock));
 
+	thread_current()->wait_on_lock = lock;
+	donate_priority();
+
 	sema_down (&lock->semaphore);
-	lock->holder = thread_current ();
+	lock->holder = thread_current();
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -232,6 +230,10 @@ lock_release (struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (lock_held_by_current_thread (lock));
 
+	struct thread *cur = thread_current();
+	remove_with_lock(lock);
+	refresh_priority();
+	
 	lock->holder = NULL;
 	sema_up (&lock->semaphore);
 }
@@ -245,7 +247,7 @@ lock_held_by_current_thread (const struct lock *lock) {
 
 	return lock->holder == thread_current ();
 }
-
+
 /* One semaphore in a list. */
 struct semaphore_elem {
 	struct list_elem elem;              /* List element. */
@@ -323,7 +325,7 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED) {
    LOCK).  LOCK must be held before calling this function.
 
    An interrupt handler cannot acquire a lock, so it does not
-   make sense to try to signal a condition variable within an
+   make sense to try to signal a/home/hkyoo988/pintos/dev/hkyoo988/threads condition variable within an
    interrupt handler. */
 void
 cond_broadcast (struct condition *cond, struct lock *lock) {
@@ -332,4 +334,68 @@ cond_broadcast (struct condition *cond, struct lock *lock) {
 
 	while (!list_empty (&cond->waiters))
 		cond_signal (cond, lock);
+}
+
+// b = prev(a)
+bool sema_compare_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED){
+	
+	struct semaphore_elem *l_sema = list_entry (a, struct semaphore_elem, elem);
+	struct semaphore_elem *s_sema = list_entry (b, struct semaphore_elem, elem);
+
+	struct list *waiter_l_sema = &(l_sema->semaphore.waiters);
+	struct list *waiter_s_sema = &(s_sema->semaphore.waiters);
+
+	return list_entry (list_begin (waiter_l_sema), struct thread, elem)->priority
+		 > list_entry (list_begin (waiter_s_sema), struct thread, elem)->priority;
+
+}
+
+bool compare_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED){
+
+	struct thread *t1 = list_entry(a, struct thread, priority_elem);
+	struct thread *t2 = list_entry(b, struct thread, priority_elem);
+	// 새로운 스레드가 더 높은 우선순위 = 0, 아니면 1
+	if (t1->priority > t2->priority){
+		return 1;
+	}else{
+		return 0;
+	}
+}
+
+void donate_priority(void){
+	struct thread *curr = thread_current();
+	struct thread *holder = curr->wait_on_lock->holder;
+	int cnt = 0;
+	if (holder != NULL)
+		list_insert_ordered(&holder->donor, &curr->priority_elem, compare_priority, NULL);
+	while(holder != NULL){
+		holder->priority = curr->priority;	
+		cnt++;
+		if (cnt > 8 || holder->wait_on_lock == NULL){
+			break;
+		}
+		holder = holder->wait_on_lock->holder;
+	}
+}
+
+void remove_with_lock(struct lock *lock){
+	struct thread *curr = thread_current();
+	struct list_elem *ptr = list_begin(&curr->donor);
+	while(ptr != list_tail(&curr->donor)){
+		struct thread *donor = list_entry(ptr, struct thread, priority_elem);
+		if(donor->wait_on_lock == lock){
+			list_remove(ptr);
+		}
+		ptr = ptr->next;
+	}
+}
+
+void refresh_priority(void){
+	struct thread *cur = thread_current();
+	if(!list_empty(&(cur->donor))){
+		struct thread *donor = list_entry(list_begin(&(cur->donor)), struct thread, priority_elem);
+		cur->priority = donor->priority;
+	}else{
+		cur->priority = cur->init_priority;
+	}
 }
