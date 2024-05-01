@@ -13,6 +13,7 @@
 #include "intrinsic.h"
 #ifdef USERPROG
 #include "userprog/process.h"
+#include "synch.h"
 #endif
 
 /* struct thread의 `magic' 멤버에 대한 무작위 값.
@@ -197,10 +198,7 @@ tid_t thread_create(const char *name, int priority,
 	t->tf.eflags = FLAG_IF;
 	/* 실행 대기열에 추가 */
 	thread_unblock(t);
-	t2 = thread_current();
-	if(compare_elem(&t->elem, &t2->elem, NULL) == 0){
-		thread_yield();
-	}
+	test_max_priority();
 
 	return tid;
 }
@@ -247,11 +245,11 @@ bool compare_elem(const struct list_elem *a, const struct list_elem *b, void *au
 	struct thread *t2 = list_entry(b, struct thread, elem);
 	// 새로운 스레드가 더 높은 우선순위 = 0, 아니면 1
 	if (t1->priority > t2->priority){
-		return 0;
-	}else{
 		return 1;
+	}else{
+		return 0;
 	}
-};
+}
 
 /* 실행 중인 쓰레드의 이름을 반환합니다. */
 const char *
@@ -324,14 +322,16 @@ void thread_yield(void)
 void thread_set_priority(int new_priority)
 {
 	thread_current()->priority = new_priority;
+	thread_current()->init_priority = new_priority;
+	refresh_priority();
 	test_max_priority();
 
 }
 
 void test_max_priority(void){
 	if (!list_empty (&ready_list) && 
-    thread_current ()->priority < 
-    list_entry (list_front (&ready_list), struct thread, elem)->priority)
+    thread_current()->priority < 
+    list_entry(list_front (&ready_list), struct thread, elem)->priority)
         thread_yield ();
 }
 
@@ -426,6 +426,9 @@ init_thread(struct thread *t, const char *name, int priority)
 	t->tf.rsp = (uint64_t)t + PGSIZE - sizeof(void *);
 	t->priority = priority;
 	t->magic = THREAD_MAGIC;
+	t->init_priority = priority;
+	t->wait_on_lock = NULL;
+	list_init(&t->donor);
 }
 
 /* 스케줄할 다음 쓰레드를 선택하고 반환합니다.
@@ -487,7 +490,7 @@ thread_launch(struct thread *th)
 
 	/*주요 스위칭 로직입니다.
 	 * 먼저 전체 실행 컨텍스트를 intr_frame에 복원하고
-	 * 로 전체 실행 컨텍스트를 복원하고 do_iret을 호출하여 다음 스레드로 전환합니다.
+	 * do_iret을 호출하여 다음 스레드로 전환합니다.
 	 * 여기서부터 스택을 사용해서는 안 됩니다.
 	 * 전환이 완료될 때까지 스택을 사용해서는 안 됩니다.*/
 	__asm __volatile(
@@ -519,7 +522,7 @@ thread_launch(struct thread *th)
 		"addq $120, %%rax\n"
 		"movw %%es, (%%rax)\n"
 		"movw %%ds, 8(%%rax)\n"
-		"addq $32, %%rax\n"
+		"addq $32, %%rax\n"	
 		"call __next\n" // read the current rip.
 		"__next:\n"
 		"pop %%rbx\n"
