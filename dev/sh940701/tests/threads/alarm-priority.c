@@ -24,7 +24,7 @@ test_alarm_priority (void)
   wake_time = timer_ticks () + 5 * TIMER_FREQ;
   sema_init (&wait_sema, 0);
   
-  for (i = 0; i < 10; i++) 
+   for (i = 0; i < 10; i++) 
     {
       int priority = PRI_DEFAULT - (i + 5) % 10 - 1;
       char name[16];
