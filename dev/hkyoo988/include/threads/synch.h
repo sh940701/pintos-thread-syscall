@@ -39,6 +39,7 @@ void cond_signal (struct condition *, struct lock *);
 void cond_broadcast (struct condition *, struct lock *);
 
 bool sema_compare_priority(const struct list_elem *a, const struct list_elem *b, void *aux);
+void refresh_priority(void);
 
 /* Optimization barrier.
  *
