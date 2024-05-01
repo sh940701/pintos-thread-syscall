@@ -36,12 +36,36 @@ void timer_init(void)
 {
 	/* 8254 input frequency divided by TIMER_FREQ, rounded to
 	   nearest. */
+	// The timer will divide it's input clock of 1.19MHz (1193180Hz) -> 8254 timer 의 clock 값은 1.193180MHz 이다. 즉 1 초에 1193180 번 진동한다.
+	// http://www.osdever.net/bkerndev/Docs/pit.htm
 	uint16_t count = (1193180 + TIMER_FREQ / 2) / TIMER_FREQ;
 
+	// 0x43: timer 에게 전달할 제어 명령어를 기록하는 port
+	// 0x34: 00110100 -> 00 / 11 / 010 / 0
+		// 00: 0, 1, 2 중 0번째 카운터 선택
+		// 11: 이후에 LSB 와 MSB 를 전송하겠다.
+		// 010: 모드2(Rate Generator) 방식을 사용하겠다.
+		// 0: 이진 카운팅 방식을 사용하겠다.
 	outb(0x43, 0x34); /* CW: counter 0, LSB then MSB, mode 2, binary. */
+
+	// outX 함수는 I/O port 에 8/16/32 bit 값을 보내는 연산
+	// outb 함수는 byte(8bit) 단위로 보내는 함수이기 때문에, 16 bit 를 두 개로 나눠서 전송
+	// https://wiki.osdev.org/Inline_Assembly/Examples
+
+	// 0번째 timer 의 port 인 0x40에 LSB, MSB 를 보냄
+	// 이 때 count 값(timer 주기) 은 16bit 이므로, 8bit 씩 나눠서 전송
 	outb(0x40, count & 0xff);
 	outb(0x40, count >> 8);
 
+	// 결과적으로 1 초에 1193180 번 진동하는 timer 가 11932 번 진동할 때마다 신호를 보내므로, 10ms 마다 interrupt 가 발생함을 알 수 있다.
+
+	// interrupt_hander[0x20] 에 timer_interrupt 함수를 mapping 한다.
+	// 주소값이 0x20 인 이유는 다음과 같다.
+		// 1. 8254 timer 의 0번 채널은 IRQ0 으로 interrupt 신호를 발생시킨다.
+		// 2. IRQ0 번은 프로그래밍적으로 시스템 카운터로 정해져있다.
+		// 3. 이 때 Interrupt 요청은, PIC(programmable Interrupt controller) 에 전달되는데, Pintos 에서 IRQ0 은 0x20 으로 변경되어 전달된다.
+		// 4. 그러므로 intr_register_ext 함수에서 0x20 에 timer_interrupt 함수를 저장하는 것이다.
+	// https://web.eecs.umich.edu/~ryanph/jhu/cs318/fall22/lectures/lec2_arch_annotated.pdf
 	intr_register_ext(0x20, timer_interrupt, "8254 Timer");
 }
 
