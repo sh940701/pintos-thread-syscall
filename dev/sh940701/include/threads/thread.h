@@ -93,6 +93,11 @@ struct thread {
 	int priority;                       /* Priority. */
 	int64_t wakeup_time; // sleep_thread 가 일어나야 할 시간
 
+	int initial_priority; // 최초 priority 저장
+	struct lock *wait_on_lock; // 현재 thread 가 요청했는데 받지 못한 lock. 기다리는 중임
+	struct list donation_list; // 자신에게 donation 을 해 준 스레드 list
+	struct list_elem donation_elem; // 위 thread list 를 관리하기 위한 element. thread 구조체의 elem 과 구분하기 위해 생성
+
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
 
