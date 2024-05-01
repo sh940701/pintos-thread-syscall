@@ -1,0 +1,12 @@
+{
+    "files.associations": {
+        "round.h": "c",
+        "inttypes.h": "c",
+        "debug.h": "c",
+        "stdio.h": "c",
+        "tests.h": "c",
+        "interrupt.h": "c",
+        "flags.h": "c",
+        "process.h": "c"
+    }
+}

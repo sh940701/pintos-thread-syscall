@@ -16,7 +16,7 @@
 #endif
 
 /* struct thread의 `magic' 멤버에 대한 무작위 값.
-   스택 오버플로우를 감지하기 위해 사용됨.  자세한 내용은
+   스택 오버플로우를 감지하기 위해 사용됨.  자세한 내용은₩
    thread.h 파일 맨 위의 큰 주석 참조. */
 #define THREAD_MAGIC 0xcd6abf4b
 
@@ -202,7 +202,7 @@ tid_t thread_create(const char *name, int priority,
 
 	/* 실행 대기열에 추가 */
 	thread_unblock(t);
-
+	priority_schedule();
 	return tid;
 }
 
@@ -235,7 +235,7 @@ void thread_unblock(struct thread *t)
 
 	old_level = intr_disable();
 	ASSERT(t->status == THREAD_BLOCKED);
-	list_push_back(&ready_list, &t->elem);
+	list_insert_ordered(&ready_list, &t->elem, compare_thread_priority, NULL);
 	t->status = THREAD_READY;
 	intr_set_level(old_level);
 }
@@ -302,15 +302,43 @@ void thread_yield(void)
 
 	old_level = intr_disable();
 	if (curr != idle_thread)
-		list_push_back(&ready_list, &curr->elem);
+		list_insert_ordered(&ready_list, &curr->elem, compare_thread_priority, NULL); /* #2 Priority Scheduling : 우선순위에 맞춰 삽입*/
 	do_schedule(THREAD_READY);
 	intr_set_level(old_level);
+}
+/* #2 Priority Scheduling : 현재 실행 중인 쓰레드보다 더 높은 우선순위의 쓰레드가 ready_list에 있다면 양보 */
+void priority_schedule(void)
+{
+	enum intr_level old_level = intr_disable();
+	if (!list_empty(&ready_list))
+	{
+		struct thread *t = thread_current();
+		struct thread *next = list_entry(list_begin(&ready_list), struct thread, elem);
+		if (t->priority < next->priority)
+			thread_yield();
+	}
+	intr_set_level(old_level);
+}
+
+/* #2 Priority Scheduling : 우선순위 비교 함수*/
+bool compare_thread_priority(const struct list_elem *a,
+							 const struct list_elem *b,
+							 void *aux)
+{
+	struct thread *a_t, *b_t;
+	a_t = list_entry(a, struct thread, elem);
+	b_t = list_entry(b, struct thread, elem);
+	return a_t->priority > b_t->priority;
 }
 
 /* 현재 쓰레드의 우선 순위를 NEW_PRIORITY로 설정합니다. */
 void thread_set_priority(int new_priority)
 {
 	thread_current()->priority = new_priority;
+	thread_current()->init_priority = new_priority;
+
+	refresh_priority();
+	priority_schedule();
 }
 
 /* 현재 쓰레드의 우선 순위를 반환합니다. */
@@ -404,6 +432,11 @@ init_thread(struct thread *t, const char *name, int priority)
 	t->tf.rsp = (uint64_t)t + PGSIZE - sizeof(void *);
 	t->priority = priority;
 	t->magic = THREAD_MAGIC;
+
+	/* #2 Priority Scheduling : donation 관련 변수초기화 */
+	list_init(&t->donations);
+	t->init_priority = priority;
+	t->wait_on_lock = NULL;
 }
 
 /* 스케줄할 다음 쓰레드를 선택하고 반환합니다.
