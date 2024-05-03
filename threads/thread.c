@@ -626,7 +626,7 @@ void priority_schedule(void)
 	{
 		struct thread *curr = thread_current();
 		struct thread *next = list_entry(list_begin(&ready_list), struct thread, elem);
-		if (curr->priority < next->priority)
+		if (!intr_context() && curr->priority < next->priority)
 			thread_yield();
 	}
 	intr_set_level(old_level);
