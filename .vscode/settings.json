@@ -1,6 +1,11 @@
 {
     "files.associations": {
         "input.h": "c",
-        "interrupt.h": "c"
+        "interrupt.h": "c",
+        "thread.h": "c",
+        "lib.h": "c",
+        "syscall.h": "c",
+        "fsutil.h": "c",
+        "*.inc": "c"
     }
 }
