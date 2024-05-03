@@ -24,22 +24,20 @@ static int64_t ticks;
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
 
-/* #1 Alarm-Clock : Sleeping threads */
-static struct list sleeping_threads;
+/* #1 Alarm-Clock : sleeping thread list */
+static struct list sleep_list;
 
-/* #1 Alarm-Clock : thread sleep */
-static void thread_sleep(int64_t wake_ticks);
-
-/* #1 Alarm-Clock : thread wakeup */
-static void thread_wakeup();
 static intr_handler_func timer_interrupt;
 static bool too_many_loops(unsigned loops);
 static void busy_wait(int64_t loops);
 static void real_time_sleep(int64_t num, int32_t denom);
-/* #1 Alarm-Clock : thread wake_tick comparing */
-bool compare_wake_tick(const struct list_elem *a,
-					   const struct list_elem *b,
-					   void *aux);
+
+/* #1 Alarm-Clock : thread sleep */
+static void thread_sleep(int64_t wake_ticks);
+/* #1 Alarm-Clock : thread wake up */
+static void thread_wakeup();
+/* #1 Alarm-Clock : compare wake tick */
+static bool compare_wake_tick(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
 
 /* Sets up the 8254 Programmable Interval Timer (PIT) to
    interrupt PIT_FREQ times per second, and registers the
@@ -48,10 +46,6 @@ void timer_init(void)
 {
 	/* 8254 input frequency divided by TIMER_FREQ, rounded to
 	   nearest. */
-
-	// #1 Alarm-Clock : sleeping_threads list 초기화
-	list_init(&sleeping_threads);
-
 	uint16_t count = (1193180 + TIMER_FREQ / 2) / TIMER_FREQ;
 
 	outb(0x43, 0x34); /* CW: counter 0, LSB then MSB, mode 2, binary. */
@@ -59,6 +53,9 @@ void timer_init(void)
 	outb(0x40, count >> 8);
 
 	intr_register_ext(0x20, timer_interrupt, "8254 Timer");
+
+	/* #1 Alarm-Clock : sleep list init*/
+	list_init(&sleep_list);
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -106,9 +103,9 @@ timer_elapsed(int64_t then)
 	return timer_ticks() - then;
 }
 
+/* #1 Alarm-Clock : thread sleep by ticks */
 /* Suspends execution for approximately TICKS timer ticks. */
-/* #1 Alarm-Clock : timer_sleep */
-void timer_sleep(int64_t ticks) // ticks이 경과할때 까지 실행 중지
+void timer_sleep(int64_t ticks)
 {
 	if (ticks <= 0)
 		return;
@@ -116,24 +113,6 @@ void timer_sleep(int64_t ticks) // ticks이 경과할때 까지 실행 중지
 	enum intr_level old_level = intr_disable();
 	thread_sleep(timer_ticks() + ticks);
 	intr_set_level(old_level);
-}
-/* #1 Alarm-Clock : thread wake_tick comparing */
-bool compare_wake_tick(const struct list_elem *a,
-					   const struct list_elem *b,
-					   void *aux)
-{
-	struct thread *a_t, *b_t;
-	a_t = list_entry(a, struct thread, elem);
-	b_t = list_entry(b, struct thread, elem);
-	return a_t->wake_tick < b_t->wake_tick;
-}
-/* #1 Alarm-Clock : thread wakeup */
-static void thread_sleep(int64_t wake_ticks)
-{
-	struct thread *t = thread_current();
-	t->wake_tick = wake_ticks;
-	list_insert_ordered(&sleeping_threads, &t->elem, compare_wake_tick, NULL);
-	thread_block();
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -160,31 +139,14 @@ void timer_print_stats(void)
 	printf("Timer: %" PRId64 " ticks\n", timer_ticks());
 }
 
+/* #1 Alarm-Clock : wake thread */
 /* Timer interrupt handler. */
 static void
 timer_interrupt(struct intr_frame *args UNUSED)
 {
 	ticks++;
-	/* #1 Alarm-Clock : working thread wakeup */
 	thread_wakeup();
 	thread_tick();
-}
-/* #1 Alarm-Clock : thread wakeup */
-static void thread_wakeup()
-{
-	ASSERT(intr_context);
-
-	struct list_elm *p = list_head(&sleeping_threads);
-	struct list_elm *tail = list_tail(&sleeping_threads);
-	while (list_next(p) != tail)
-	{
-		struct thread *t = list_entry(list_next(p), struct thread, elem);
-		if (t->wake_tick > ticks)
-
-			break;
-		list_remove(list_next(p));
-		thread_unblock(t);
-	}
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
@@ -248,4 +210,37 @@ real_time_sleep(int64_t num, int32_t denom)
 		ASSERT(denom % 1000 == 0);
 		busy_wait(loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000));
 	}
+}
+
+/* #1 Alarm-Clock : thread sleep */
+static void thread_sleep(int64_t wake_ticks)
+{
+	struct thread *t = thread_current();
+	t->wake_ticks = wake_ticks;
+	list_insert_ordered(&sleep_list, &t->elem, compare_wake_tick, NULL);
+	thread_block();
+}
+
+/* #1 Alarm-Clock : thread wakeup */
+static void thread_wakeup()
+{
+	ASSERT(intr_context);
+
+	struct list_elm *p = list_head(&sleep_list);
+	struct list_elm *tail = list_tail(&sleep_list);
+	while (list_next(p) != tail)
+	{
+		struct thread *t = list_entry(list_next(p), struct thread, elem);
+		if (t->wake_ticks > ticks)
+			break;
+		list_remove(list_next(p));
+		thread_unblock(t);
+	}
+}
+
+static bool compare_wake_tick(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+	struct thread *t1 = list_entry(a, struct thread, elem);
+	struct thread *t2 = list_entry(b, struct thread, elem);
+	return t1->wake_ticks < t2->wake_ticks;
 }

@@ -24,8 +24,6 @@ struct lock
 	struct semaphore semaphore; /* Binary semaphore controlling access. */
 };
 
-void refresh_priority(void);
-
 void lock_init(struct lock *);
 void lock_acquire(struct lock *);
 bool lock_try_acquire(struct lock *);
@@ -43,6 +41,8 @@ void cond_wait(struct condition *, struct lock *);
 void cond_signal(struct condition *, struct lock *);
 void cond_broadcast(struct condition *, struct lock *);
 
+/* #2 Priority Scheduling : 우선순위 기부자 목록(donations)을 확인하여 현재 쓰레드의 우선순위 갱신 */
+void renew_priority();
 /* Optimization barrier.
  *
  * The compiler will not reorder operations across an
