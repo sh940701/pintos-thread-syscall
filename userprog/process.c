@@ -44,6 +44,7 @@ process_init(void)
 tid_t process_create_initd(const char *file_name)
 {
 	char *fn_copy;
+	char *_;
 	tid_t tid;
 
 	/* Make a copy of FILE_NAME.
@@ -52,9 +53,10 @@ tid_t process_create_initd(const char *file_name)
 	if (fn_copy == NULL)
 		return TID_ERROR;
 	strlcpy(fn_copy, file_name, PGSIZE);
-
+	strtok_r(file_name, " ", &_);
 	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create(file_name, PRI_DEFAULT, initd, fn_copy);
+	tid = thread_create(file_name,
+						PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
 		palloc_free_page(fn_copy);
 	return tid;
@@ -242,13 +244,12 @@ process_cleanup(void)
 	pml4 = curr->pml4;
 	if (pml4 != NULL)
 	{
-		/* Correct ordering here is crucial.  We must set
-		 * cur->pagedir to NULL before switching page directories,
-		 * so that a timer interrupt can't switch back to the
-		 * process page directory.  We must activate the base page
-		 * directory before destroying the process's page
-		 * directory, or our active page directory will be one
-		 * that's been freed (and cleared). */
+		/* 이곳에서 올바른 순서가 매우 중요합니다.
+		 * cur->pagedir를 페이지 디렉터리 전환하기 전에 NULL로 설정해야 합니다.
+		 * 이렇게 하지 않으면 타이머 인터럽트가 프로세스 페이지 디렉터리로 다시 전환될 수 있습니다.
+		 * 프로세스의 페이지 디렉터리를 파괴하기 전에 기본 페이지 디렉터리를 활성화해야 합니다.
+		 * 그렇지 않으면 활성 페이지 디렉터리는 해제(및 지워짐)된 것이 될 것입니다. */
+
 		curr->pml4 = NULL;
 		pml4_activate(NULL);
 		pml4_destroy(pml4);
@@ -479,11 +480,12 @@ load(const char *file_name, struct intr_frame *if_)
 
 	char *stack_p = if_->rsp - length + padding; // padding 건너뜀
 	char **argv_p = if_->rsp - total_length + 8; // return address 건너뜀
+
 	if_->R.rsi = argv_p;
 	if_->rsp = argv_p - 1;
 	if_->R.rdi = count;
 
-	token = strtok_r(file_name, " ", &save_ptr);
+	token = file_name;
 
 	for (i = 0; i < count; i++)
 	{

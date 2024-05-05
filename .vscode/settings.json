@@ -6,6 +6,10 @@
         "lib.h": "c",
         "syscall.h": "c",
         "fsutil.h": "c",
-        "*.inc": "c"
+        "*.inc": "c",
+        "stdint.h": "c",
+        "syscall-nr.h": "c",
+        "intrinsic.h": "c",
+        "loader.h": "c"
     }
 }
