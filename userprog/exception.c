@@ -107,6 +107,9 @@ kill(struct intr_frame *f)
    [IA32-v3a] 섹션 5.15 "예외 및 인터럽트 참조"의 "Interrupt 14--Page Fault Exception (#PF)"에서.
 */
 
+// page_fault 로 들어오는 것들은, system call 을 실행하기 이전에 CPU -> MMU 레벨에서 현재 MMU 에 mapping 되어있지 않은 주소라는 것을 판단하고 넘어온 상황이다.
+// 그러므로 우리가 해야 할 것은, 해당 fault 를 발생시킨 주소가 정말 접근해서는 안 되는 주소인지, 접근 가능하지만 아직 할당이 안 된 페이지인지 파악하고
+// 이에 대한 처리를 해주는 것이다.
 static void page_fault(struct intr_frame *f)
 {
 	bool not_present; /* 참: 존재하지 않는 페이지, 거짓: 읽기 전용 페이지. */
@@ -138,11 +141,18 @@ static void page_fault(struct intr_frame *f)
 	/* 페이지 폴트를 카운트합니다. */
 	page_fault_cnt++;
 
+	if ((!not_present && write) || (fault_addr < 0x400000 || fault_addr >= USER_STACK)) {
+		exit(-1);
+	} else {
+		// page allocation 으로 변경
+		kill(f);
+	}
+
 	/* 폴트가 진짜 폴트인 경우 정보를 표시하고 종료합니다. */
-	printf("Page fault at %p: %s error %s page in %s context.\n",
-		   fault_addr,
-		   not_present ? "not present" : "rights violation",
-		   write ? "writing" : "reading",
-		   user ? "user" : "kernel");
-	kill(f);
+	// printf("Page fault at %p: %s error %s page in %s context.\n",
+	// 	   fault_addr,
+	// 	   not_present ? "not present" : "rights violation",
+	// 	   write ? "writing" : "reading",
+	// 	   user ? "user" : "kernel");
+
 }
