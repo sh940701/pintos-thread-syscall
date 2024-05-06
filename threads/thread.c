@@ -426,6 +426,11 @@ init_thread(struct thread *t, const char *name, int priority)
 	t->tf.rsp = (uint64_t)t + PGSIZE - sizeof(void *);
 	t->priority = priority;
 	t->magic = THREAD_MAGIC;
+
+	for (int i = 0; i < FDT_SIZE; i++) {
+        t->fdt[i] = NULL; // Initialize all file descriptors to NULL
+    }
+
 	t->nextfd = 2; // start of user process file descriptor
 
 	/* #2 Priority Scheduling : priority donation에 필요한 변수 초기화 */

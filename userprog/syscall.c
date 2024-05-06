@@ -160,7 +160,7 @@ bool remove(const char *file)
 }
 int open(const char *file_name) {
 	check_address(file_name);
-	
+
 	struct thread *curr = thread_current();
 
 	// open-normal
@@ -172,5 +172,14 @@ int open(const char *file_name) {
 
 	curr->fdt[curr->nextfd] = _file;
 
-	return curr->nextfd++;
+	int current_fd = curr->nextfd;
+
+	for (int i = 2; i < FDT_SIZE; i++) {
+		if (curr->fdt[i] == NULL) {
+			curr->nextfd = i;
+			break;
+		}
+	}
+
+	return current_fd;
 }
