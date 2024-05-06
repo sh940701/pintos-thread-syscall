@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
+#include "filesys/filesys.h"
 #include "threads/thread.h"
 #include "threads/loader.h"
 #include "threads/palloc.h"
@@ -16,6 +17,8 @@ void exit(int status);
 int exec(const char *file);
 bool create(const char *file, unsigned iniital_size);
 bool remove(const char *file);
+int open(const char *filename);
+void close(int fd);
 
 /* 시스템 호출.
  *
@@ -78,6 +81,7 @@ void syscall_handler(struct intr_frame *f)
 			break;
 			/* Open a file. */
 		case SYS_OPEN:
+			f->R.rax = open(f->R.rdi);
 			break;
 			/* Obtain a file's size. */
 		case SYS_FILESIZE:
@@ -98,6 +102,7 @@ void syscall_handler(struct intr_frame *f)
 			break;
 			/* Close a file. */
 		case SYS_CLOSE:
+			close(f->R.rdi);
 			break;
 		}
 	}
@@ -153,4 +158,43 @@ bool remove(const char *file)
 {
 	check_address(file);
 	return filesys_remove(file);
+}
+int open(const char *file_name) {
+	check_address(file_name);
+
+	struct thread *curr = thread_current();
+
+	// open-normal
+	struct file *_file = filesys_open(file_name);
+
+	if (_file == NULL) {
+		return -1;
+	}
+
+	curr->fdt[curr->nextfd] = _file;
+
+	int current_fd = curr->nextfd;
+
+	for (int i = 2; i < FDT_SIZE; i++) {
+		if (curr->fdt[i] == NULL) {
+			curr->nextfd = i;
+			break;
+		}
+	}
+
+	return current_fd;
+}
+
+void close(int fd) {
+	struct thread *curr = thread_current();
+
+	if (FDT_SIZE <= fd || fd < 0 || curr->fdt[fd] == NULL ) {
+		exit(-1);
+	}
+
+	// 1. fdt[fd] 에 담긴 값을 free
+	file_close(curr->fdt[fd]);
+	
+	// 2. fdt[fd] NULL
+	curr->fdt[fd] = NULL;
 }
