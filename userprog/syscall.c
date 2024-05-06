@@ -17,6 +17,8 @@ void exit(int status);
 int exec(const char *file);
 bool create(const char *file, unsigned iniital_size);
 bool remove(const char *file);
+tid_t fork(const char *thread_name, struct intr_frame *f);
+int wait(tid_t tid);
 int open(const char *filename);
 void close(int fd);
 
@@ -63,6 +65,7 @@ void syscall_handler(struct intr_frame *f)
 			break;
 			/* Clone current process. */
 		case SYS_FORK:
+			f->R.rax = fork(f->R.rdi, f);
 			break;
 			/* Switch current process. */
 		case SYS_EXEC:
@@ -70,6 +73,7 @@ void syscall_handler(struct intr_frame *f)
 			break;
 			/* Wait for a child process to die. */
 		case SYS_WAIT:
+			f->R.rax = wait(f->R.rdi);
 			break;
 			/* Create a file. */
 		case SYS_CREATE:
@@ -127,8 +131,8 @@ void halt()
 }
 void exit(int status)
 {
-	struct thread *curr = thread_current();
-	printf("%s: exit(%d)\n", curr->name, status);
+	thread_current()->exit_status = status;
+	printf("%s: exit(%d)\n", thread_current()->name, thread_current()->exit_status);
 	thread_exit();
 }
 int exec(const char *file)
@@ -158,6 +162,15 @@ bool remove(const char *file)
 {
 	check_address(file);
 	return filesys_remove(file);
+}
+tid_t fork(const char *thread_name, struct intr_frame *f)
+{
+	check_address(thread_name);
+	return process_fork(thread_name, f);
+}
+int wait(tid_t tid)
+{
+	return process_wait(tid);
 }
 int open(const char *file_name) {
 	check_address(file_name);
