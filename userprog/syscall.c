@@ -16,6 +16,7 @@ void exit(int status);
 int exec(const char *file);
 bool create(const char *file, unsigned iniital_size);
 bool remove(const char *file);
+int open(const char *filename);
 
 /* 시스템 호출.
  *
@@ -78,6 +79,9 @@ void syscall_handler(struct intr_frame *f)
 			break;
 			/* Open a file. */
 		case SYS_OPEN:
+			// rax == SYS_OPEN
+			// rdi == filename
+			f->R.rax = open(f->R.rdi);
 			break;
 			/* Obtain a file's size. */
 		case SYS_FILESIZE:
@@ -153,4 +157,7 @@ bool remove(const char *file)
 {
 	check_address(file);
 	return filesys_remove(file);
+}
+int open(const char *filename) {
+	
 }
