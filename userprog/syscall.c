@@ -17,6 +17,7 @@ int exec(const char *file);
 bool create(const char *file, unsigned iniital_size);
 bool remove(const char *file);
 tid_t fork(const char *thread_name, struct intr_frame *f);
+int wait(tid_t tid);
 
 /* 시스템 호출.
  *
@@ -69,6 +70,7 @@ void syscall_handler(struct intr_frame *f)
 			break;
 			/* Wait for a child process to die. */
 		case SYS_WAIT:
+			f->R.rax = wait(f->R.rdi);
 			break;
 			/* Create a file. */
 		case SYS_CREATE:
@@ -124,8 +126,8 @@ void halt()
 }
 void exit(int status)
 {
-	struct thread *curr = thread_current();
-	printf("%s: exit(%d)\n", curr->name, status);
+	thread_current()->exit_status = status;
+	printf("%s: exit(%d)\n", thread_current()->name, thread_current()->exit_status);
 	thread_exit();
 }
 int exec(const char *file)
@@ -159,5 +161,9 @@ bool remove(const char *file)
 tid_t fork(const char *thread_name, struct intr_frame *f)
 {
 	check_address(thread_name);
-	return process_fork(thread_name, thread_current());
+	return process_fork(thread_name, f);
+}
+int wait(tid_t tid)
+{
+	return process_wait(tid);
 }

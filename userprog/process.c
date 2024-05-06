@@ -80,6 +80,13 @@ static struct thread *get_child(tid_t tid)
 {
 	struct thread *curr = thread_current();
 	struct list *childs = &curr->childs;
+	for (struct list_elem *p = list_begin(childs); p != list_end(childs); p = p->next)
+	{
+		struct thread *t = list_entry(p, struct thread, child_elem);
+		if (t->tid == tid)
+			return t;
+	}
+	return NULL;
 }
 /* Clones the current process as `name`. Returns the new process's thread id, or
  * TID_ERROR if the thread cannot be created. */
@@ -225,7 +232,10 @@ int process_exec(void *f_name)
 	/* If load failed, quit. */
 	palloc_free_page(file_name);
 	if (!success)
+	{
+		exit(-1);
 		return -1;
+	}
 
 	/* Start switched process. */
 	do_iret(&_if);
@@ -246,7 +256,16 @@ int process_wait(tid_t child_tid)
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
-	timer_sleep(150);
+	// timer_sleep(150);
+	struct thread *curr = thread_current();
+	struct thread *t = get_child(child_tid);
+	if (t)
+	{
+		sema_down(&t->sema_wait);
+		int status = t->exit_status;
+		list_remove(&t->child_elem);
+		return status;
+	}
 	return -1;
 }
 
@@ -254,11 +273,7 @@ int process_wait(tid_t child_tid)
 void process_exit(void)
 {
 	struct thread *curr = thread_current();
-	/* TODO: Your code goes here.
-	 * TODO: Implement process termination message (see
-	 * TODO: project2/process_termination.html).
-	 * TODO: We recommend you to implement process resource cleanup here. */
-
+	sema_up(&curr->sema_wait);
 	process_cleanup();
 }
 
@@ -421,7 +436,6 @@ load(const char *file_name, struct intr_frame *if_)
 	padding = 8 - length % 8;
 	length = ALLIGN(length, 8);
 	total_length = length + (count + 1) * 8 + 8;
-	printf("count : %d\n", count);
 	// // =============================
 	/* Allocate and activate page directory. */
 	t->pml4 = pml4_create();
@@ -431,6 +445,7 @@ load(const char *file_name, struct intr_frame *if_)
 
 	/* Open executable file. */
 	file = filesys_open(file_name);
+
 	if (file == NULL)
 	{
 		printf("load: %s: open failed\n", file_name);
@@ -525,7 +540,6 @@ load(const char *file_name, struct intr_frame *if_)
 	{
 		while (*token == ' ')
 			token++;
-		printf("token : %s\n", token);
 		int len = strlen(token) + 1;
 		*argv_p = stack_p;
 		memcpy(stack_p, token, len);
@@ -533,7 +547,6 @@ load(const char *file_name, struct intr_frame *if_)
 		argv_p += 1;
 		stack_p += len;
 	}
-	printf("rdi : %d, rsi : %p, rsp : %p\n", if_->R.rdi, if_->R.rsi, if_->rsp);
 	// hex_dump(if_->rsp, if_->rsp, total_length, true);
 
 	success = true;

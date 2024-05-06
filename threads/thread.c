@@ -441,6 +441,9 @@ init_thread(struct thread *t, const char *name, int priority)
 	/* System call : exit() */
 	t->exit_status = 0;
 
+	/* System call : wait() */
+	sema_init(&t->sema_wait, 0);
+
 	/* System call : fork() */
 	sema_init(&t->sema_fork, 0);
 	list_init(&t->childs);
