@@ -23,6 +23,7 @@ int open(const char *filename);
 void close(int fd);
 int read(int fd, void *buffer, unsigned size);
 int filesize(int fd);
+int write(int fd, void *buffer, unsigned size);
 
 /* 시스템 호출.
  *
@@ -99,8 +100,7 @@ void syscall_handler(struct intr_frame *f)
 			break;
 			/* Write to a file. */
 		case SYS_WRITE:
-			// check_address(f->R.rsi);
-			printf("%s", f->R.rsi);
+			f->R.rax = write(f->R.rdi, f->R.rsi, f->R.rdx);
 			break;
 			/* Change position in a file. */
 		case SYS_SEEK:
@@ -237,9 +237,7 @@ int read(int fd, void *buffer, unsigned size)
 			exit(-1);
 		}
 
-		int num = file_read(curr->fdt[fd], buffer, size);
-
-		return num;
+		return file_read(curr->fdt[fd], buffer, size);
 	}
 }
 
@@ -254,4 +252,23 @@ int filesize(int fd)
 	int length = file_length(curr->fdt[fd]);
 
 	return length;
+}
+
+int write(int fd, void *buffer, unsigned size)
+{
+	check_address(buffer);
+	if (fd == 1)
+	{
+		putbuf(buffer, size);
+		return size;
+	}
+
+	struct thread *curr = thread_current();
+
+	if (FDT_SIZE <= fd || fd < 2 || curr->fdt[fd] == NULL)
+	{
+		exit(-1);
+	}
+
+	return file_write(curr->fdt[fd], buffer, size);
 }
