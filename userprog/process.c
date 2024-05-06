@@ -170,8 +170,6 @@ __do_fork(void *aux)
 	struct intr_frame *parent_if = &parent->parent_if;
 	bool succ = true;
 
-	// list_push_back(&current->childs, &parent->child_elem);
-
 	/* 1. Read the cpu context to local stack. */
 	memcpy(&if_, parent_if, sizeof(struct intr_frame));
 	if_.R.rax = 0; // set return value to 0
@@ -196,6 +194,17 @@ __do_fork(void *aux)
 	 * TODO:       in include/filesys/file.h. Note that parent should not return
 	 * TODO:       from the fork() until this function successfully duplicates
 	 * TODO:       the resources of parent.*/
+
+	for (int i = 0; i < FDT_SIZE; i++)
+	{
+		struct file *file = parent->fdt[i];
+		if (file)
+			if (file > 2)
+				current->fdt[i] = file_duplicate(file);
+			else
+				current->fdt[i] = file;
+	}
+	current->nextfd = parent->nextfd;
 
 	process_init();
 	sema_up(&current->sema_fork);
