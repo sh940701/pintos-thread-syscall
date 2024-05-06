@@ -106,7 +106,7 @@ remove (const char *file) {
 }
 
 int
-open (const char *file) {
+open (const char *file) { // file name
 	return syscall1 (SYS_OPEN, file);
 }
 
