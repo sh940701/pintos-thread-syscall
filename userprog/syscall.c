@@ -158,6 +158,19 @@ bool remove(const char *file)
 	check_address(file);
 	return filesys_remove(file);
 }
-int open(const char *filename) {
+int open(const char *file_name) {
+	check_address(file_name);
 	
+	struct thread *curr = thread_current();
+
+	// open-normal
+	struct file *_file = filesys_open(file_name);
+
+	if (_file == NULL) {
+		return -1;
+	}
+
+	curr->fdt[curr->nextfd] = _file;
+
+	return curr->nextfd++;
 }
