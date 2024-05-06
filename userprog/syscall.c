@@ -21,6 +21,8 @@ tid_t fork(const char *thread_name, struct intr_frame *f);
 int wait(tid_t tid);
 int open(const char *filename);
 void close(int fd);
+int read(int fd, void *buffer, unsigned size);
+int filesize(int fd);
 
 /* 시스템 호출.
  *
@@ -89,9 +91,11 @@ void syscall_handler(struct intr_frame *f)
 			break;
 			/* Obtain a file's size. */
 		case SYS_FILESIZE:
+			f->R.rax = filesize(f->R.rdi);
 			break;
 			/* Read from a file. */
 		case SYS_READ:
+			f->R.rax = read(f->R.rdi, f->R.rsi, f->R.rdx);
 			break;
 			/* Write to a file. */
 		case SYS_WRITE:
@@ -172,7 +176,8 @@ int wait(tid_t tid)
 {
 	return process_wait(tid);
 }
-int open(const char *file_name) {
+int open(const char *file_name)
+{
 	check_address(file_name);
 
 	struct thread *curr = thread_current();
@@ -180,7 +185,8 @@ int open(const char *file_name) {
 	// open-normal
 	struct file *_file = filesys_open(file_name);
 
-	if (_file == NULL) {
+	if (_file == NULL)
+	{
 		return -1;
 	}
 
@@ -188,8 +194,10 @@ int open(const char *file_name) {
 
 	int current_fd = curr->nextfd;
 
-	for (int i = 2; i < FDT_SIZE; i++) {
-		if (curr->fdt[i] == NULL) {
+	for (int i = 2; i < FDT_SIZE; i++)
+	{
+		if (curr->fdt[i] == NULL)
+		{
 			curr->nextfd = i;
 			break;
 		}
@@ -198,16 +206,52 @@ int open(const char *file_name) {
 	return current_fd;
 }
 
-void close(int fd) {
+void close(int fd)
+{
 	struct thread *curr = thread_current();
 
-	if (FDT_SIZE <= fd || fd < 0 || curr->fdt[fd] == NULL ) {
+	if (FDT_SIZE <= fd || fd < 0 || curr->fdt[fd] == NULL)
+	{
 		exit(-1);
 	}
 
 	// 1. fdt[fd] 에 담긴 값을 free
 	file_close(curr->fdt[fd]);
-	
+
 	// 2. fdt[fd] NULL
 	curr->fdt[fd] = NULL;
+}
+
+int read(int fd, void *buffer, unsigned size)
+{
+	struct thread *curr = thread_current();
+
+	if (fd == 0)
+	{
+		return input_getc();
+	}
+	else
+	{
+		if (FDT_SIZE <= fd || fd < 0 || curr->fdt[fd] == NULL)
+		{
+			exit(-1);
+		}
+
+		int num = file_read(curr->fdt[fd], buffer, size);
+
+		return num;
+	}
+}
+
+int filesize(int fd)
+{
+	struct thread *curr = thread_current();
+
+	if (FDT_SIZE <= fd || fd < 2 || curr->fdt[fd] == NULL)
+	{
+		exit(-1);
+	}
+	int length = file_length(curr->fdt[fd]);
+
+	return length;
 }
