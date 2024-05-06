@@ -16,6 +16,7 @@ void exit(int status);
 int exec(const char *file);
 bool create(const char *file, unsigned iniital_size);
 bool remove(const char *file);
+tid_t fork(const char *thread_name, struct intr_frame *f);
 
 /* 시스템 호출.
  *
@@ -60,6 +61,7 @@ void syscall_handler(struct intr_frame *f)
 			break;
 			/* Clone current process. */
 		case SYS_FORK:
+			f->R.rax = fork(f->R.rdi, f);
 			break;
 			/* Switch current process. */
 		case SYS_EXEC:
@@ -153,4 +155,9 @@ bool remove(const char *file)
 {
 	check_address(file);
 	return filesys_remove(file);
+}
+tid_t fork(const char *thread_name, struct intr_frame *f)
+{
+	check_address(thread_name);
+	return process_fork(thread_name, thread_current());
 }
