@@ -211,3 +211,7 @@ void close(int fd) {
 	// 2. fdt[fd] NULL
 	curr->fdt[fd] = NULL;
 }
+
+int read() {
+	
+}
