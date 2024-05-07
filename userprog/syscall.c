@@ -25,6 +25,7 @@ void close(int fd);
 int read(int fd, void *buffer, unsigned size);
 int filesize(int fd);
 int write(int fd, void *buffer, unsigned size);
+unsigned tell(int fd);
 void seek(int fd, unsigned position);
 
 struct lock fd_lock;
@@ -288,7 +289,8 @@ int write(int fd, void *buffer, unsigned size)
 	return cnt;
 }
 
-unsigned tell(int fd) {
+unsigned tell(int fd)
+{
 	struct thread *curr = thread_current();
 
 	if (FDT_SIZE <= fd || fd < 2 || curr->fdt[fd] == NULL)

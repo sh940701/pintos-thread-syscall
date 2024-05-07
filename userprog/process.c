@@ -104,6 +104,8 @@ tid_t process_fork(const char *name, struct intr_frame *if_)
 
 	sema_down(&child->sema_fork);
 
+	if (child->exit_status < 0)
+		return TID_ERROR;
 	return tid;
 }
 
@@ -193,14 +195,15 @@ __do_fork(void *aux)
 	 * TODO:       from the fork() until this function successfully duplicates
 	 * TODO:       the resources of parent.*/
 
-	for (int i = 0; i < FDT_SIZE; i++)
+	if (parent->nextfd >= FDT_SIZE)
+	{
+		goto error;
+	}
+	for (int i = 2; i < FDT_SIZE; i++)
 	{
 		struct file *file = parent->fdt[i];
 		if (file)
-			if (file > 2)
-				current->fdt[i] = file_duplicate(file);
-			else
-				current->fdt[i] = file;
+			current->fdt[i] = file_duplicate(file);
 	}
 	current->nextfd = parent->nextfd;
 
@@ -264,6 +267,10 @@ int process_wait(tid_t child_tid)
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
 	// timer_sleep(150);
+	if (child_tid <= 0)
+	{
+		return -1;
+	}
 	struct thread *curr = thread_current();
 	struct thread *t = get_child(child_tid);
 	if (t)
@@ -291,8 +298,14 @@ void process_exit(void)
 
 	process_cleanup();
 
+	for (struct list_elem *p = list_begin(&curr->childs); p != list_end(&curr->childs); p = p->next)
+	{
+		struct thread *t = list_entry(p, struct thread, child_elem);
+		sema_up(&t->sema_exit);
+	}
+
 	sema_up(&curr->sema_wait);
-	sema_down(&curr->sema_exit)
+	sema_down(&curr->sema_exit);
 }
 
 /* Free the current process's resources. */
