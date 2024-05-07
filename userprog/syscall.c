@@ -8,6 +8,7 @@
 #include "threads/palloc.h"
 #include "userprog/gdt.h"
 #include "threads/flags.h"
+#include "threads/synch.h"
 #include "intrinsic.h"
 
 void syscall_entry(void);
@@ -24,6 +25,9 @@ void close(int fd);
 int read(int fd, void *buffer, unsigned size);
 int filesize(int fd);
 int write(int fd, void *buffer, unsigned size);
+void seek(int fd, unsigned position);
+
+struct lock fd_lock;
 
 /* 시스템 호출.
  *
@@ -40,6 +44,8 @@ int write(int fd, void *buffer, unsigned size);
 
 void syscall_init(void)
 {
+	lock_init(&fd_lock);
+
 	write_msr(MSR_STAR, ((uint64_t)SEL_UCSEG - 0x10) << 48 |
 							((uint64_t)SEL_KCSEG) << 32);
 	write_msr(MSR_LSTAR, (uint64_t)syscall_entry);
@@ -104,6 +110,7 @@ void syscall_handler(struct intr_frame *f)
 			break;
 			/* Change position in a file. */
 		case SYS_SEEK:
+			seek(f->R.rdi, f->R.rsi);
 			break;
 			/* Report current position in a file. */
 		case SYS_TELL:
@@ -225,6 +232,8 @@ void close(int fd)
 
 int read(int fd, void *buffer, unsigned size)
 {
+	check_address(buffer);
+
 	struct thread *curr = thread_current();
 
 	if (fd == 0)
@@ -237,8 +246,10 @@ int read(int fd, void *buffer, unsigned size)
 		{
 			exit(-1);
 		}
-
-		return file_read(curr->fdt[fd], buffer, size);
+		lock_acquire(&fd_lock);
+		int cnt = file_read(curr->fdt[fd], buffer, size);
+		lock_release(&fd_lock);
+		return cnt;
 	}
 }
 
@@ -258,6 +269,7 @@ int filesize(int fd)
 int write(int fd, void *buffer, unsigned size)
 {
 	check_address(buffer);
+
 	if (fd == 1)
 	{
 		putbuf(buffer, size);
@@ -270,8 +282,10 @@ int write(int fd, void *buffer, unsigned size)
 	{
 		exit(-1);
 	}
-
-	return file_write(curr->fdt[fd], buffer, size);
+	lock_acquire(&fd_lock);
+	int cnt = file_write(curr->fdt[fd], buffer, size);
+	lock_release(&fd_lock);
+	return cnt;
 }
 
 unsigned tell(int fd) {
@@ -283,4 +297,11 @@ unsigned tell(int fd) {
 	}
 
 	return file_tell(fd);
+}
+
+void seek(int fd, unsigned position)
+{
+	struct thread *curr = thread_current();
+	if (curr->fdt[fd] && position >= 0)
+		file_seek(curr->fdt[fd], position);
 }

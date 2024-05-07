@@ -138,7 +138,6 @@ duplicate_pte(uint64_t *pte, void *va, void *aux)
 	{
 		return false;
 	}
-
 	/* 4. TODO: Duplicate parent's page to the new page and
 	 *    TODO: check whether parent's page is writable or not (set WRITABLE
 	 *    TODO: according to the result). */
@@ -170,8 +169,6 @@ __do_fork(void *aux)
 	struct intr_frame *parent_if = &parent->parent_if;
 	bool succ = true;
 
-	// list_push_back(&current->childs, &parent->child_elem);
-
 	/* 1. Read the cpu context to local stack. */
 	memcpy(&if_, parent_if, sizeof(struct intr_frame));
 	if_.R.rax = 0; // set return value to 0
@@ -196,6 +193,17 @@ __do_fork(void *aux)
 	 * TODO:       in include/filesys/file.h. Note that parent should not return
 	 * TODO:       from the fork() until this function successfully duplicates
 	 * TODO:       the resources of parent.*/
+
+	for (int i = 0; i < FDT_SIZE; i++)
+	{
+		struct file *file = parent->fdt[i];
+		if (file)
+			if (file > 2)
+				current->fdt[i] = file_duplicate(file);
+			else
+				current->fdt[i] = file;
+	}
+	current->nextfd = parent->nextfd;
 
 	process_init();
 	sema_up(&current->sema_fork);
@@ -262,9 +270,9 @@ int process_wait(tid_t child_tid)
 	if (t)
 	{
 		sema_down(&t->sema_wait);
-		int status = t->exit_status;
 		list_remove(&t->child_elem);
-		return status;
+		sema_up(&t->sema_exit);
+		return t->exit_status;
 	}
 	return -1;
 }
@@ -273,8 +281,14 @@ int process_wait(tid_t child_tid)
 void process_exit(void)
 {
 	struct thread *curr = thread_current();
-	sema_up(&curr->sema_wait);
+	for (int i = 2; i < FDT_SIZE; i++)
+	{
+		file_close(curr->fdt[i]);
+	}
+	file_close(curr->running_file);
 	process_cleanup();
+	sema_up(&curr->sema_wait);
+	sema_down(&curr->sema_exit);
 }
 
 /* Free the current process's resources. */
@@ -445,13 +459,11 @@ load(const char *file_name, struct intr_frame *if_)
 
 	/* Open executable file. */
 	file = filesys_open(file_name);
-
 	if (file == NULL)
 	{
 		printf("load: %s: open failed\n", file_name);
 		goto done;
 	}
-
 	/* Read and verify executable header. */
 	if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr || memcmp(ehdr.e_ident, "\177ELF\2\1\1", 7) || ehdr.e_type != 2 || ehdr.e_machine != 0x3E // amd64
 		|| ehdr.e_version != 1 || ehdr.e_phentsize != sizeof(struct Phdr) || ehdr.e_phnum > 1024)
@@ -459,7 +471,6 @@ load(const char *file_name, struct intr_frame *if_)
 		printf("load: %s: error loading executable\n", file_name);
 		goto done;
 	}
-
 	/* Read program headers. */
 	file_ofs = ehdr.e_phoff;
 	for (i = 0; i < ehdr.e_phnum; i++)
@@ -518,6 +529,9 @@ load(const char *file_name, struct intr_frame *if_)
 		}
 	}
 
+	file_deny_write(file);
+	t->running_file = file;
+
 	/* Set up stack. */
 	if (!setup_stack(if_))
 		goto done;
@@ -550,10 +564,8 @@ load(const char *file_name, struct intr_frame *if_)
 	// hex_dump(if_->rsp, if_->rsp, total_length, true);
 
 	success = true;
-
 done:
 	/* We arrive here whether the load is successful or not. */
-	file_close(file);
 	return success;
 }
 
