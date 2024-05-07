@@ -114,6 +114,7 @@ void syscall_handler(struct intr_frame *f)
 			break;
 			/* Report current position in a file. */
 		case SYS_TELL:
+			f->R.rax = tell(f->R.rdi);
 			break;
 			/* Close a file. */
 		case SYS_CLOSE:
@@ -286,6 +287,18 @@ int write(int fd, void *buffer, unsigned size)
 	lock_release(&fd_lock);
 	return cnt;
 }
+
+unsigned tell(int fd) {
+	struct thread *curr = thread_current();
+
+	if (FDT_SIZE <= fd || fd < 2 || curr->fdt[fd] == NULL)
+	{
+		exit(-1);
+	}
+
+	return file_tell(fd);
+}
+
 void seek(int fd, unsigned position)
 {
 	struct thread *curr = thread_current();
