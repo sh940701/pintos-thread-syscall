@@ -165,7 +165,6 @@ __do_fork(void *aux)
 	struct intr_frame if_;
 	struct thread *parent = (struct thread *)aux;
 	struct thread *current = thread_current();
-	/* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
 	struct intr_frame *parent_if = &parent->parent_if;
 	bool succ = true;
 
@@ -271,8 +270,9 @@ int process_wait(tid_t child_tid)
 	{
 		sema_down(&t->sema_wait);
 		list_remove(&t->child_elem);
+		int status = t->exit_status;
 		sema_up(&t->sema_exit);
-		return t->exit_status;
+		return status;
 	}
 	return -1;
 }
@@ -281,14 +281,18 @@ int process_wait(tid_t child_tid)
 void process_exit(void)
 {
 	struct thread *curr = thread_current();
+	/* file descriptors close */
 	for (int i = 2; i < FDT_SIZE; i++)
 	{
 		file_close(curr->fdt[i]);
 	}
+	/* running file close*/
 	file_close(curr->running_file);
+
 	process_cleanup();
+
 	sema_up(&curr->sema_wait);
-	sema_down(&curr->sema_exit);
+	sema_down(&curr->sema_exit)
 }
 
 /* Free the current process's resources. */
@@ -565,7 +569,6 @@ load(const char *file_name, struct intr_frame *if_)
 
 	success = true;
 done:
-	/* We arrive here whether the load is successful or not. */
 	return success;
 }
 
@@ -785,7 +788,7 @@ setup_stack(struct intr_frame *if_)
 
 	/* TODO: Map the stack on stack_bottom and claim the page immediately.
 	 * TODO: If success, set the rsp accordingly.
-	 * TODO: You should mark the page is stack. */
+	 * TODO: You should mark the page is stack */
 	/* TODO: Your code goes here */
 
 	return success;
