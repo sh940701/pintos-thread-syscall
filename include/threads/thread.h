@@ -28,7 +28,7 @@ typedef int tid_t;
 #define PRI_MIN 0	   /* Lowest priority. */
 #define PRI_DEFAULT 31 /* Default priority. */
 #define PRI_MAX 63	   /* Highest priority. */
-#define FDT_SIZE 130 // file descriptor size: stdin + stdout + 128
+#define FDT_SIZE 130   // file descriptor size: stdin + stdout + 128
 
 /* A kernel thread or user process.
  *
@@ -107,16 +107,20 @@ struct thread
 	struct list donations;			// donated thread list
 	struct list_elem donation_elem; // thread donate element
 
-	/* system-call */
-	struct file *fdt[FDT_SIZE];
-	int nextfd;
-
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4; /* Page map level 4 */
 
+	/* deny write in process */
+	struct file *running_file;
+
+	/* system-call : filesys */
+	struct file *fdt[FDT_SIZE];
+	int nextfd;
+
 	/* System call : exit() */
 	int exit_status;
+	struct semaphore sema_exit;
 
 	/* System call : wait() */
 	struct semaphore sema_wait;
