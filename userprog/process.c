@@ -151,6 +151,7 @@ duplicate_pte(uint64_t *pte, void *va, void *aux)
 	if (!pml4_set_page(current->pml4, va, newpage, writable))
 	{
 		/* 6. TODO: if fail to insert page, do error handling. */
+		palloc_free_page(newpage);
 		return false;
 	}
 	return true;
@@ -189,17 +190,11 @@ __do_fork(void *aux)
 		goto error;
 #endif
 
-	/* TODO: Your code goes here.
-	 * TODO: Hint) To duplicate the file object, use `file_duplicate`
-	 * TODO:       in include/filesys/file.h. Note that parent should not return
-	 * TODO:       from the fork() until this function successfully duplicates
-	 * TODO:       the resources of parent.*/
-
 	if (parent->nextfd >= FDT_SIZE)
 	{
 		goto error;
 	}
-	for (int i = 2; i < FDT_SIZE; i++)
+	for (int i = 2; i < parent->nextfd; i++)
 	{
 		struct file *file = parent->fdt[i];
 		if (file)
@@ -293,17 +288,16 @@ void process_exit(void)
 	{
 		file_close(curr->fdt[i]);
 	}
+	// palloc_free_multiple(curr->fdt, FDT_SIZE);
 	/* running file close*/
 	file_close(curr->running_file);
-
-	process_cleanup();
 
 	for (struct list_elem *p = list_begin(&curr->childs); p != list_end(&curr->childs); p = p->next)
 	{
 		struct thread *t = list_entry(p, struct thread, child_elem);
 		sema_up(&t->sema_exit);
 	}
-
+	process_cleanup();
 	sema_up(&curr->sema_wait);
 	sema_down(&curr->sema_exit);
 }
