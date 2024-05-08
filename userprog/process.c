@@ -190,10 +190,6 @@ __do_fork(void *aux)
 		goto error;
 #endif
 
-	if (parent->nextfd >= FDT_SIZE)
-	{
-		goto error;
-	}
 	for (int i = 2; i < parent->nextfd; i++)
 	{
 		struct file *file = parent->fdt[i];
@@ -291,13 +287,13 @@ void process_exit(void)
 	// palloc_free_multiple(curr->fdt, FDT_SIZE);
 	/* running file close*/
 	file_close(curr->running_file);
+	process_cleanup();
 
 	for (struct list_elem *p = list_begin(&curr->childs); p != list_end(&curr->childs); p = p->next)
 	{
 		struct thread *t = list_entry(p, struct thread, child_elem);
 		sema_up(&t->sema_exit);
 	}
-	process_cleanup();
 	sema_up(&curr->sema_wait);
 	sema_down(&curr->sema_exit);
 }
@@ -463,6 +459,7 @@ load(const char *file_name, struct intr_frame *if_)
 	total_length = length + (count + 1) * 8 + 8;
 	// // =============================
 	/* Allocate and activate page directory. */
+
 	t->pml4 = pml4_create();
 	if (t->pml4 == NULL)
 		goto done;

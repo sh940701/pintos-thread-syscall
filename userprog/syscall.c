@@ -191,7 +191,11 @@ int open(const char *file_name)
 
 	struct thread *curr = thread_current();
 
-	// open-normal
+	if (curr->nextfd >= FDT_SIZE)
+	{
+		return -1;
+	}
+
 	struct file *_file = filesys_open(file_name);
 
 	if (_file == NULL)
@@ -208,9 +212,11 @@ int open(const char *file_name)
 		if (curr->fdt[i] == NULL)
 		{
 			curr->nextfd = i;
-			break;
+			return current_fd;
 		}
 	}
+
+	curr->nextfd = FDT_SIZE;
 
 	return current_fd;
 }
