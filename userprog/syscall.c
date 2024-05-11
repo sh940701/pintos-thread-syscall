@@ -3,12 +3,14 @@
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "filesys/filesys.h"
+#include "filesys/file.h"
 #include "threads/thread.h"
 #include "threads/loader.h"
 #include "threads/palloc.h"
 #include "userprog/gdt.h"
 #include "threads/flags.h"
 #include "threads/synch.h"
+#include "userprog/syscall.h"
 #include "intrinsic.h"
 
 void syscall_entry(void);
@@ -27,6 +29,7 @@ int filesize(int fd);
 int write(int fd, void *buffer, unsigned size);
 unsigned tell(int fd);
 void seek(int fd, unsigned position);
+int dup2(int oldfd, int newfd);
 
 struct lock fd_lock;
 
@@ -121,11 +124,10 @@ void syscall_handler(struct intr_frame *f)
 		case SYS_CLOSE:
 			close(f->R.rdi);
 			break;
+		case SYS_DUP2:
+			f->R.rax = dup2(f->R.rdi, f->R.rsi);
+			break;
 		}
-	}
-	else
-	{
-		printf("Whaaaatt?!?@?!@#!!!\n");
 	}
 	// thread_exit();
 }
@@ -176,15 +178,18 @@ bool remove(const char *file)
 	check_address(file);
 	return filesys_remove(file);
 }
+/* System call : fork */
 tid_t fork(const char *thread_name, struct intr_frame *f)
 {
 	check_address(thread_name);
 	return process_fork(thread_name, f);
 }
+/* System call : wait */
 int wait(tid_t tid)
 {
 	return process_wait(tid);
 }
+/* System call : open */
 int open(const char *file_name)
 {
 	check_address(file_name);
@@ -207,7 +212,7 @@ int open(const char *file_name)
 
 	int current_fd = curr->nextfd;
 
-	for (int i = 2; i < FDT_SIZE; i++)
+	for (int i = 0; i < FDT_SIZE; i++)
 	{
 		if (curr->fdt[i] == NULL)
 		{
@@ -221,17 +226,20 @@ int open(const char *file_name)
 	return current_fd;
 }
 
+/* System call : close */
 void close(int fd)
 {
 	struct thread *curr = thread_current();
 
-	if (FDT_SIZE <= fd || fd < 0 || curr->fdt[fd] == NULL)
+	if (!is_file_descryptor(curr->fdt[fd], fd))
 	{
 		exit(-1);
 	}
-
-	// 1. fdt[fd] 에 담긴 값을 free
-	file_close(curr->fdt[fd]);
+	if (is_real_file(curr->fdt[fd]))
+	{
+		// 1. fdt[fd] 에 담긴 값을 free
+		file_close(curr->fdt[fd]);
+	}
 
 	// 2. fdt[fd] NULL
 	curr->fdt[fd] = NULL;
@@ -243,28 +251,27 @@ int read(int fd, void *buffer, unsigned size)
 
 	struct thread *curr = thread_current();
 
-	if (fd == 0)
+	if (is_file_descryptor(curr->fdt[fd], fd))
 	{
-		return input_getc();
-	}
-	else
-	{
-		if (FDT_SIZE <= fd || fd < 0 || curr->fdt[fd] == NULL)
-		{
-			exit(-1);
-		}
+		if (curr->fdt[fd] == FD_STDOUT)
+			return -1;
+		if (curr->fdt[fd] == FD_STDIN)
+			return input_getc();
+
 		lock_acquire(&fd_lock);
 		int cnt = file_read(curr->fdt[fd], buffer, size);
 		lock_release(&fd_lock);
+
 		return cnt;
 	}
+	return -1;
 }
 
 int filesize(int fd)
 {
 	struct thread *curr = thread_current();
 
-	if (FDT_SIZE <= fd || fd < 2 || curr->fdt[fd] == NULL)
+	if (!is_file_descryptor(curr->fdt[fd], fd) || !is_real_file(curr->fdt[fd]))
 	{
 		exit(-1);
 	}
@@ -276,40 +283,54 @@ int filesize(int fd)
 int write(int fd, void *buffer, unsigned size)
 {
 	check_address(buffer);
-
-	if (fd == 1)
-	{
-		putbuf(buffer, size);
-		return size;
-	}
-
 	struct thread *curr = thread_current();
 
-	if (FDT_SIZE <= fd || fd < 2 || curr->fdt[fd] == NULL)
+	if (is_file_descryptor(curr->fdt[fd], fd) && curr->fdt[fd] != FD_STDIN)
 	{
-		exit(-1);
+		if (curr->fdt[fd] == FD_STDOUT)
+		{
+			putbuf(buffer, size);
+			return size;
+		}
+		lock_acquire(&fd_lock);
+		int cnt = file_write(curr->fdt[fd], buffer, size);
+		lock_release(&fd_lock);
+		return cnt;
 	}
-	lock_acquire(&fd_lock);
-	int cnt = file_write(curr->fdt[fd], buffer, size);
-	lock_release(&fd_lock);
-	return cnt;
+	return -1;
 }
 
 unsigned tell(int fd)
 {
 	struct thread *curr = thread_current();
 
-	if (FDT_SIZE <= fd || fd < 2 || curr->fdt[fd] == NULL)
-	{
+	if (is_file_descryptor(curr->fdt[fd], fd) && is_real_file(curr->fdt[fd]))
+		return file_tell(curr->fdt[fd]);
+	else
 		exit(-1);
-	}
-
-	return file_tell(fd);
 }
 
 void seek(int fd, unsigned position)
 {
 	struct thread *curr = thread_current();
-	if (curr->fdt[fd] && position >= 0)
+	if (is_file_descryptor(curr->fdt[fd], fd) && is_real_file(curr->fdt[fd]) && position >= 0)
 		file_seek(curr->fdt[fd], position);
+}
+int dup2(int oldfd, int newfd)
+{
+	struct thread *curr = thread_current();
+	if (oldfd == newfd || newfd < 0 || newfd >= FDT_SIZE)
+		return -1;
+	if (!is_file_descryptor(curr->fdt[oldfd], oldfd))
+		return -1;
+	if (curr->fdt[oldfd] == curr->fdt[newfd])
+		return newfd;
+	if (curr->fdt[newfd] != NULL && is_real_file(curr->fdt[newfd]))
+	{
+		file_close(curr->fdt[newfd]);
+	}
+	if (is_real_file(curr->fdt[oldfd]))
+		file_add_count(curr->fdt[oldfd]);
+	curr->fdt[newfd] = curr->fdt[oldfd];
+	return newfd;
 }

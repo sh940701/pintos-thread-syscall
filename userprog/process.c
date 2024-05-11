@@ -33,7 +33,16 @@ static void __do_fork(void *);
 static void
 process_init(void)
 {
-	struct thread *current = thread_current();
+	struct thread *curr = thread_current();
+	curr->fdt = palloc_get_multiple(PAL_ZERO, FDT_PAGE_CNT);
+	if (curr->fdt == NULL)
+	{
+		exit(-1);
+		NOT_REACHED();
+	}
+	curr->fdt[0] = FD_STDIN;
+	curr->fdt[1] = FD_STDOUT;
+	curr->nextfd = 2;
 }
 
 /* Starts the first userland program, called "initd", loaded from FILE_NAME.
@@ -79,8 +88,8 @@ initd(void *f_name)
 static struct thread *get_child(tid_t tid)
 {
 	struct thread *curr = thread_current();
-	struct list *childs = &curr->childs;
-	for (struct list_elem *p = list_begin(childs); p != list_end(childs); p = p->next)
+	struct list *children = &curr->children;
+	for (struct list_elem *p = list_begin(children); p != list_end(children); p = p->next)
 	{
 		struct thread *t = list_entry(p, struct thread, child_elem);
 		if (t->tid == tid)
@@ -158,6 +167,88 @@ duplicate_pte(uint64_t *pte, void *va, void *aux)
 }
 #endif
 
+static struct dub2_elem
+{
+	struct file *origin;
+	struct file *copied;
+	struct list_elem elem;
+	unsigned count;
+};
+static void free_dub2_fds()
+{
+	struct thread *curr = thread_current();
+	for (struct list_elem *p = list_begin(&curr->dub2_fds);
+		 p != list_end(&curr->dub2_fds);)
+	{
+		struct dub2_elem *dub2_fd = list_entry(p, struct dub2_elem, elem);
+		p = list_remove(p);
+		free(dub2_fd);
+	}
+}
+static struct dub2_elem *find_dub2_fd(struct list *dub2_fds, struct file *file)
+{
+	for (struct list_elem *p = list_begin(dub2_fds);
+		 p != list_end(dub2_fds);
+		 p = p->next)
+	{
+		struct dub2_elem *dub2_fd = list_entry(p, struct dub2_elem, elem);
+		if (dub2_fd->origin == file)
+		{
+			return dub2_fd;
+		}
+	}
+	return NULL;
+}
+static int duplicate_fdt(struct thread *parent)
+{
+	struct thread *curr = thread_current();
+
+	for (int i = 0; i < FDT_SIZE; i++)
+	{
+		struct file *file = parent->fdt[i];
+		if (file)
+			if (is_real_file(file))
+			{
+				if (!get_file_count(file))
+					curr->fdt[i] = file_duplicate(file);
+				else
+				{
+					struct dub2_elem *dub2_fd = find_dub2_fd(&curr->dub2_fds, file);
+					if (dub2_fd)
+					{
+						curr->fdt[i] = dub2_fd->copied;
+						dub2_fd->count--;
+						if (dub2_fd->count <= 0)
+						{
+							list_remove(&dub2_fd->elem);
+							free(dub2_fd);
+						}
+					}
+					else
+					{
+						dub2_fd = calloc(1, sizeof(struct dub2_elem));
+						if (dub2_fd == NULL)
+						{
+							return -1;
+						}
+						dub2_fd->origin = file;
+						dub2_fd->copied = file_duplicate(file);
+						dub2_fd->count = get_file_count(file);
+						list_push_back(&curr->dub2_fds, &dub2_fd->elem);
+						curr->fdt[i] = dub2_fd->copied;
+					}
+				}
+			}
+			else
+			{
+				curr->fdt[i] = file;
+			}
+	}
+	curr->nextfd = parent->nextfd;
+	free_dub2_fds();
+	return 0;
+}
+
 /* 부모의 실행 컨텍스트를 복제하는 쓰레드 함수입니다.
 
 힌트) parent->tf는 프로세스의 사용자 랜드 컨텍스트를 저장하지 않습니다.
@@ -167,7 +258,7 @@ __do_fork(void *aux)
 {
 	struct intr_frame if_;
 	struct thread *parent = (struct thread *)aux;
-	struct thread *current = thread_current();
+	struct thread *curr = thread_current();
 	struct intr_frame *parent_if = &parent->parent_if;
 	bool succ = true;
 
@@ -176,11 +267,11 @@ __do_fork(void *aux)
 	if_.R.rax = 0; // set return value to 0
 
 	/* 2. Duplicate PT */
-	current->pml4 = pml4_create();
-	if (current->pml4 == NULL)
+	curr->pml4 = pml4_create();
+	if (curr->pml4 == NULL)
 		goto error;
 
-	process_activate(current);
+	process_activate(curr);
 #ifdef VM
 	supplemental_page_table_init(&current->spt);
 	if (!supplemental_page_table_copy(&current->spt, &parent->spt))
@@ -190,22 +281,22 @@ __do_fork(void *aux)
 		goto error;
 #endif
 
-	for (int i = 2; i < parent->nextfd; i++)
+	if (parent->nextfd >= FDT_SIZE)
 	{
-		struct file *file = parent->fdt[i];
-		if (file)
-			current->fdt[i] = file_duplicate(file);
+		goto error;
 	}
-	current->nextfd = parent->nextfd;
-
 	process_init();
-	sema_up(&current->sema_fork);
+	if (duplicate_fdt(parent) < 0)
+	{
+		goto error;
+	}
+	sema_up(&curr->sema_fork);
 	/* Finally, switch to the newly created process. */
 	if (succ)
 		do_iret(&if_);
 error:
-	current->exit_status = TID_ERROR;
-	sema_up(&current->sema_fork);
+	curr->exit_status = TID_ERROR;
+	sema_up(&curr->sema_fork);
 	exit(TID_ERROR);
 }
 
@@ -280,16 +371,19 @@ void process_exit(void)
 {
 	struct thread *curr = thread_current();
 	/* file descriptors close */
-	for (int i = 2; i < FDT_SIZE; i++)
+	if (curr->fdt)
 	{
-		file_close(curr->fdt[i]);
+		for (int i = 2; i < FDT_SIZE; i++)
+		{
+			if (is_real_file(curr->fdt[i]))
+				file_close(curr->fdt[i]);
+		}
+		palloc_free_multiple(curr->fdt, FDT_PAGE_CNT);
 	}
-	// palloc_free_multiple(curr->fdt, FDT_SIZE);
 	/* running file close*/
-	file_close(curr->running_file);
 	process_cleanup();
 
-	for (struct list_elem *p = list_begin(&curr->childs); p != list_end(&curr->childs); p = p->next)
+	for (struct list_elem *p = list_begin(&curr->children); p != list_end(&curr->children); p = p->next)
 	{
 		struct thread *t = list_entry(p, struct thread, child_elem);
 		sema_up(&t->sema_exit);
@@ -302,7 +396,11 @@ void process_exit(void)
 static void
 process_cleanup(void)
 {
+
 	struct thread *curr = thread_current();
+	if (curr->running_file)
+		file_close(curr->running_file);
+	free_dub2_fds();
 
 #ifdef VM
 	supplemental_page_table_kill(&curr->spt);
@@ -410,24 +508,6 @@ static int length(const char *string)
 	}
 	return 1;
 }
-// static char *get_strtoken(const char *string, int index)
-// {
-// 	int count = 0;
-// 	char *save_ptr;
-// 	char *strs;
-
-// 	printf("i : %d\n\n", index);
-// 	strs = strtok_r(string, " ", &save_ptr);
-// 	printf("%s\n", strs);
-// 	while (strs != NULL && index > 0)
-// 	{
-// 		strs = strtok_r(NULL, " ", &save_ptr);
-// 		// printf("%s\n", strs);
-// 		index--;
-// 	}
-// 	printf("str : %s\n\n", strs);
-// 	return strs;
-// }
 
 /* Loads an ELF executable from FILE_NAME into the current thread.
  * Stores the executable's entry point into *RIP
@@ -448,16 +528,22 @@ load(const char *file_name, struct intr_frame *if_)
 	int count = 0;
 	char *token, *save_ptr;
 
+	// =============================
+
 	for (token = strtok_r(file_name, " ", &save_ptr); token != NULL;
 		 token = strtok_r(NULL, " ", &save_ptr))
 	{
 		count++;
+		while (*token == ' ')
+			token++;
 		length += (strlen(token) + 1);
 	}
 	padding = 8 - length % 8;
-	length = ALLIGN(length, 8);
+	length = ALIGN(length, 8);
 	total_length = length + (count + 1) * 8 + 8;
-	// // =============================
+
+	// =============================
+
 	/* Allocate and activate page directory. */
 
 	t->pml4 = pml4_create();
@@ -611,7 +697,7 @@ validate_segment(const struct Phdr *phdr, struct file *file)
 
 	/* Disallow mapping page 0.
 	   Not only is it a bad idea to map page 0, but if we allowed
-	   it then user code that passed a null pointer to system calls
+	   it then user code that passed a null pointer to ztem calls
 	   could quite likely panic the kernel by way of null pointer
 	   assertions in memcpy(), etc. */
 	if (phdr->p_vaddr < PGSIZE)

@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include "threads/interrupt.h"
 #include "threads/synch.h"
+#include "threads/vaddr.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -22,13 +23,15 @@ enum thread_status
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
 typedef int tid_t;
-#define TID_ERROR ((tid_t)-1) /* Error value for tid_t. */
+#define TID_ERROR ((tid_t) - 1) /* Error value for tid_t. */
 
 /* Thread priorities. */
 #define PRI_MIN 0	   /* Lowest priority. */
 #define PRI_DEFAULT 31 /* Default priority. */
 #define PRI_MAX 63	   /* Highest priority. */
-#define FDT_SIZE 130   // file descriptor size: stdin + stdout + 128
+
+#define FDT_PAGE_CNT 3
+#define FDT_SIZE FDT_PAGE_CNT *(PGSIZE / 8) // file descriptor size: 128
 
 /* A kernel thread or user process.
  *
@@ -115,7 +118,7 @@ struct thread
 	struct file *running_file;
 
 	/* system-call : filesys */
-	struct file *fdt[FDT_SIZE];
+	struct file **fdt;
 	int nextfd;
 
 	/* System call : exit() */
@@ -129,8 +132,12 @@ struct thread
 	struct semaphore sema_fork;
 
 	struct intr_frame parent_if;
-	struct list childs;
+	struct list children;
 	struct list_elem child_elem;
+
+	/* System call : dub2() */
+	struct list dub2_fds;
+
 #endif
 #ifdef VM
 	/* Table for whole virtual memory owned by thread. */
