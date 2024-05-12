@@ -10,6 +10,7 @@
 #include "threads/palloc.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "filesys/file.h"
 #include "intrinsic.h"
 #ifdef USERPROG
 #include "userprog/process.h"
@@ -192,8 +193,8 @@ tid_t thread_create(const char *name, int priority,
 	tid = t->tid = allocate_tid();
 
 #ifdef USERPROG
-	/* System call : fork(),wait() */
-	list_push_back(&thread_current()->childs, &t->child_elem);
+	/* 자식프로세스 목록에 t 추가 */
+	list_push_back(&thread_current()->children, &t->child_elem);
 #endif
 	/* Call the kernel_thread if it scheduled.
 	 * Note) rdi is 1st argument, and rsi is 2nd argument. */
@@ -438,28 +439,18 @@ init_thread(struct thread *t, const char *name, int priority)
 	list_init(&t->donations); // donated thread list
 
 #ifdef USERPROG
-	/* System call : exit() */
-	t->exit_status = 0;
-	sema_init(&t->sema_exit, 0);
 
-	/* System call : wait() */
-	sema_init(&t->sema_wait, 0);
-
-	/* System call : fork() */
-	sema_init(&t->sema_fork, 0);
-	list_init(&t->childs);
-
-	/* System call : file sys */
-	for (int i = 0; i < FDT_SIZE; i++)
-	{
-		t->fdt[i] = NULL; // Initialize all file descriptors to NULL
-	}
-
-	t->nextfd = 2; // start of user process file descriptor
-
-	/* deny on write */
-
+	/* DEny Write on Executables */
 	t->running_file = NULL; // running file
+
+	/* System call */
+	t->exit_status = 0;			 // 프로세스 종료상태 초기화
+	sema_init(&t->sema_wait, 0); // 부모가 자식의 종료를 기다리는 semaphore
+	sema_init(&t->sema_exit, 0); // 자식이 종료 후 부모의 종료를 기다리는 semaphore
+	sema_init(&t->sema_fork, 0); // fork시 동기화를 위한 semaphore
+	list_init(&t->children);	 // 자식 프로세스 목록
+	list_init(&t->fd_pool);		 // 파일 디스크립터 테이블
+
 #endif
 }
 

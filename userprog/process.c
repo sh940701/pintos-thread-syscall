@@ -7,6 +7,7 @@
 #include <string.h>
 #include "userprog/gdt.h"
 #include "userprog/tss.h"
+#include "userprog/syscall.h"
 #include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
@@ -33,16 +34,42 @@ static void __do_fork(void *);
 static void
 process_init(void)
 {
+	/* 파일 디스크립터 테이블 초기화 */
 	struct thread *curr = thread_current();
-	curr->fdt = palloc_get_multiple(PAL_ZERO, FDT_PAGE_CNT);
-	if (curr->fdt == NULL)
-	{
-		exit(-1);
-		NOT_REACHED();
-	}
-	curr->fdt[0] = FD_STDIN;
-	curr->fdt[1] = FD_STDOUT;
-	curr->nextfd = 2;
+	struct list *pool = &curr->fd_pool;
+
+	struct file_elem *stdin = new_file_elem();	// stdin file_elem 생성
+	struct file_elem *stdout = new_file_elem(); // stdout file_elem 생성
+	struct fd_elem *fd_0 = NULL;
+	struct fd_elem *fd_1 = NULL;
+
+	if (!stdin || !stdout)
+		goto error;
+
+	fd_0 = register_fd(stdin, 0);  // stdin에 0번 fd 할당
+	fd_1 = register_fd(stdout, 1); // stdoutdp 1번 fd 할당
+
+	if (!fd_0 || !fd_1)
+		goto error;
+
+	stdin->file = FD_STDIN;	  // stdin 파일 지정
+	stdout->file = FD_STDOUT; // stdout 파일 지정
+
+	list_push_back(pool, &stdin->elem);	 // fd_pool에 stdin file_elem 추가
+	list_push_back(pool, &stdout->elem); // fd_pool에 stdout file_elem 추가
+
+	return;
+
+error:
+	if (stdin)
+		free(stdin);
+	if (stdout)
+		free(stdout);
+	if (fd_0)
+		free(fd_0);
+	if (fd_1)
+		free(fd_1);
+	exit(-1);
 }
 
 /* Starts the first userland program, called "initd", loaded from FILE_NAME.
@@ -102,16 +129,16 @@ static struct thread *get_child(tid_t tid)
 tid_t process_fork(const char *name, struct intr_frame *if_)
 {
 	struct thread *curr = thread_current();
-	memcpy(&curr->parent_if, if_, sizeof(struct intr_frame));
+	memcpy(&curr->parent_if, if_, sizeof(struct intr_frame)); // user context를 현재 쓰레드에 저장
 	/* Clone current thread to new thread.*/
-	tid_t tid = thread_create(name, PRI_DEFAULT, __do_fork, curr);
+	tid_t tid = thread_create(name, PRI_DEFAULT, __do_fork, curr); // 자식 프로세스 fork
 
 	if (tid == TID_ERROR)
 		return TID_ERROR;
 
 	struct thread *child = get_child(tid);
 
-	sema_down(&child->sema_fork);
+	sema_down(&child->sema_fork); // 자식 프로세스 생성을 기다림
 
 	if (child->exit_status < 0)
 		return TID_ERROR;
@@ -130,33 +157,24 @@ duplicate_pte(uint64_t *pte, void *va, void *aux)
 	void *newpage;
 	bool writable;
 
-	/* 1. TODO: If the parent_page is kernel page, then return immediately. */
 	if (is_kernel_vaddr(va))
 	{
 		return true;
 	}
-	/* 2. Resolve VA from the parent's page map level 4. */
 	parent_page = pml4_get_page(parent->pml4, va);
 	if (parent_page == NULL)
 	{
 		return false;
 	}
 
-	/* 3. TODO: Allocate new PAL_USER page for the child and set result to
-	 *    TODO: NEWPAGE. */
 	newpage = palloc_get_page(PAL_USER);
 	if (newpage == NULL)
 	{
 		return false;
 	}
-	/* 4. TODO: Duplicate parent's page to the new page and
-	 *    TODO: check whether parent's page is writable or not (set WRITABLE
-	 *    TODO: according to the result). */
 
 	memcpy(newpage, parent_page, PGSIZE);
 	writable = is_writable(pte);
-	/* 5. Add new page to child's page table at address VA with WRITABLE
-	 *    permission. */
 	if (!pml4_set_page(current->pml4, va, newpage, writable))
 	{
 		/* 6. TODO: if fail to insert page, do error handling. */
@@ -167,86 +185,84 @@ duplicate_pte(uint64_t *pte, void *va, void *aux)
 }
 #endif
 
-static struct dub2_elem
-{
-	struct file *origin;
-	struct file *copied;
-	struct list_elem elem;
-	unsigned count;
-};
-static void free_dub2_fds()
+/* 파일 디스크립터 테이블 삭제 */
+static void free_fd_pool()
 {
 	struct thread *curr = thread_current();
-	for (struct list_elem *p = list_begin(&curr->dub2_fds);
-		 p != list_end(&curr->dub2_fds);)
-	{
-		struct dub2_elem *dub2_fd = list_entry(p, struct dub2_elem, elem);
-		p = list_remove(p);
-		free(dub2_fd);
-	}
-}
-static struct dub2_elem *find_dub2_fd(struct list *dub2_fds, struct file *file)
-{
-	for (struct list_elem *p = list_begin(dub2_fds);
-		 p != list_end(dub2_fds);
-		 p = p->next)
-	{
-		struct dub2_elem *dub2_fd = list_entry(p, struct dub2_elem, elem);
-		if (dub2_fd->origin == file)
-		{
-			return dub2_fd;
-		}
-	}
-	return NULL;
-}
-static int duplicate_fdt(struct thread *parent)
-{
-	struct thread *curr = thread_current();
+	struct list *curr_pool = &curr->fd_pool;
+	struct list_elem *file_elem_p = list_begin(curr_pool);
 
-	for (int i = 0; i < FDT_SIZE; i++)
+	/* curr->fd_pool을 순회하면서 file_elem 탐색 */
+	while (file_elem_p != list_end(curr_pool))
 	{
-		struct file *file = parent->fdt[i];
-		if (file)
-			if (is_real_file(file))
-			{
-				if (!get_file_count(file))
-					curr->fdt[i] = file_duplicate(file);
-				else
-				{
-					struct dub2_elem *dub2_fd = find_dub2_fd(&curr->dub2_fds, file);
-					if (dub2_fd)
-					{
-						curr->fdt[i] = dub2_fd->copied;
-						dub2_fd->count--;
-						if (dub2_fd->count <= 0)
-						{
-							list_remove(&dub2_fd->elem);
-							free(dub2_fd);
-						}
-					}
-					else
-					{
-						dub2_fd = calloc(1, sizeof(struct dub2_elem));
-						if (dub2_fd == NULL)
-						{
-							return -1;
-						}
-						dub2_fd->origin = file;
-						dub2_fd->copied = file_duplicate(file);
-						dub2_fd->count = get_file_count(file);
-						list_push_back(&curr->dub2_fds, &dub2_fd->elem);
-						curr->fdt[i] = dub2_fd->copied;
-					}
-				}
-			}
-			else
-			{
-				curr->fdt[i] = file;
-			}
+		struct file_elem *file_elem = list_entry(file_elem_p, struct file_elem, elem);
+		struct list *fd_list = &file_elem->fd_list;
+		struct list_elem *fd_elem_p = list_begin(fd_list);
+
+		/* file_elem->fd_list를 순회하면서 fd_elem 탐색 */
+		while (fd_elem_p != list_end(fd_list))
+		{
+			/* fd_elem 삭제 */
+			struct fd_elem *fd_elem = list_entry(fd_elem_p, struct fd_elem, elem);
+			fd_elem_p = list_remove(fd_elem_p);
+			free(fd_elem);
+		}
+		/* file_elem 삭제 */
+		struct file *file = file_elem->file;
+		if (is_file(file))
+			file_close(file);
+		file_elem_p = list_remove(file_elem_p);
+		free(file_elem);
 	}
-	curr->nextfd = parent->nextfd;
-	free_dub2_fds();
-	return 0;
+}
+
+/* parent_pool을 curr->fd_pool으로 복제 */
+static bool duplicate_fd_pool(struct list *parent_pool)
+{
+	struct thread *curr = thread_current();
+	struct list *curr_pool = &curr->fd_pool;
+	struct list_elem *file_elem_p = list_begin(parent_pool);
+
+	/* parent_pool을 순회하며 parent_file_elem 탐색 */
+	while (file_elem_p != list_end(parent_pool))
+	{
+		struct file_elem *parent_file_elem = list_entry(file_elem_p, struct file_elem, elem);
+		struct file_elem *curr_file_elem = new_file_elem();
+		if (!curr_file_elem)
+			goto error;
+
+		list_push_back(curr_pool, &curr_file_elem->elem);
+
+		/* 새로운 file_elem에 parent_file_elem->file 복제하여 저장 */
+		if (is_file(parent_file_elem->file))
+			curr_file_elem->file = file_duplicate(parent_file_elem->file);
+		else
+			curr_file_elem->file = parent_file_elem->file;
+
+		if (!curr_file_elem->file)
+			goto error;
+
+		struct list *parent_fd_list = &parent_file_elem->fd_list;
+		struct list *curr_fd_list = &curr_file_elem->fd_list;
+		struct list_elem *fd_elem_p = list_begin(parent_fd_list);
+
+		/* parent_file_elem->fd_list 내의 fd_elem들을 curr_file_elem-fd_list에 복제 */
+		while (fd_elem_p != list_end(parent_fd_list))
+		{
+			struct fd_elem *parent_fd_elem = list_entry(fd_elem_p, struct fd_elem, elem);
+
+			if (!register_fd(curr_file_elem, parent_fd_elem->fd))
+				goto error;
+
+			fd_elem_p = fd_elem_p->next;
+		}
+
+		file_elem_p = file_elem_p->next;
+	}
+
+	return true;
+error:
+	return false;
 }
 
 /* 부모의 실행 컨텍스트를 복제하는 쓰레드 함수입니다.
@@ -263,8 +279,8 @@ __do_fork(void *aux)
 	bool succ = true;
 
 	/* 1. Read the cpu context to local stack. */
-	memcpy(&if_, parent_if, sizeof(struct intr_frame));
-	if_.R.rax = 0; // set return value to 0
+	memcpy(&if_, parent_if, sizeof(struct intr_frame)); // user context 복사
+	if_.R.rax = 0;										// 자식 프로세스의 반환 값은 0
 
 	/* 2. Duplicate PT */
 	curr->pml4 = pml4_create();
@@ -277,24 +293,18 @@ __do_fork(void *aux)
 	if (!supplemental_page_table_copy(&current->spt, &parent->spt))
 		goto error;
 #else
-	if (!pml4_for_each(parent->pml4, duplicate_pte, parent))
+	if (!pml4_for_each(parent->pml4, duplicate_pte, parent)) // 가상 메모리 영역 복제
 		goto error;
 #endif
 
-	if (parent->nextfd >= FDT_SIZE)
-	{
+	if (!duplicate_fd_pool(&parent->fd_pool)) // 파일 디스크립터 테이블 복제
 		goto error;
-	}
-	process_init();
-	if (duplicate_fdt(parent) < 0)
-	{
-		goto error;
-	}
+
 	sema_up(&curr->sema_fork);
-	/* Finally, switch to the newly created process. */
 	if (succ)
-		do_iret(&if_);
+		do_iret(&if_); // context 전환
 error:
+	/* 에러 발생 시 exit(-1) */
 	curr->exit_status = TID_ERROR;
 	sema_up(&curr->sema_fork);
 	exit(TID_ERROR);
@@ -371,15 +381,7 @@ void process_exit(void)
 {
 	struct thread *curr = thread_current();
 	/* file descriptors close */
-	if (curr->fdt)
-	{
-		for (int i = 2; i < FDT_SIZE; i++)
-		{
-			if (is_real_file(curr->fdt[i]))
-				file_close(curr->fdt[i]);
-		}
-		palloc_free_multiple(curr->fdt, FDT_PAGE_CNT);
-	}
+	free_fd_pool();
 	/* running file close*/
 	process_cleanup();
 
@@ -396,11 +398,9 @@ void process_exit(void)
 static void
 process_cleanup(void)
 {
-
+	/* 기존 실행 파일 close */
 	struct thread *curr = thread_current();
-	if (curr->running_file)
-		file_close(curr->running_file);
-	free_dub2_fds();
+	file_close(curr->running_file);
 
 #ifdef VM
 	supplemental_page_table_kill(&curr->spt);
@@ -528,7 +528,7 @@ load(const char *file_name, struct intr_frame *if_)
 	int count = 0;
 	char *token, *save_ptr;
 
-	// =============================
+	// =========== Argument Passing ==================
 
 	for (token = strtok_r(file_name, " ", &save_ptr); token != NULL;
 		 token = strtok_r(NULL, " ", &save_ptr))
@@ -539,10 +539,10 @@ load(const char *file_name, struct intr_frame *if_)
 		length += (strlen(token) + 1);
 	}
 	padding = 8 - length % 8;
-	length = ALIGN(length, 8);
+	length = ALLIGN(length, 8);
 	total_length = length + (count + 1) * 8 + 8;
 
-	// =============================
+	// ===============================================
 
 	/* Allocate and activate page directory. */
 
@@ -633,7 +633,7 @@ load(const char *file_name, struct intr_frame *if_)
 	/* Start address. */
 	if_->rip = ehdr.e_entry;
 
-	// ==========================================
+	// =========== Argument Passing ==================
 
 	char *stack_p = if_->rsp - length + padding; // padding 건너뜀
 	char **argv_p = if_->rsp - total_length + 8; // return address 건너뜀
@@ -655,7 +655,8 @@ load(const char *file_name, struct intr_frame *if_)
 		argv_p += 1;
 		stack_p += len;
 	}
-	// hex_dump(if_->rsp, if_->rsp, total_length, true);
+
+	// ===============================================
 
 	success = true;
 done:

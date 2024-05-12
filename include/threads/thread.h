@@ -7,6 +7,7 @@
 #include "threads/interrupt.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "userprog/syscall.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -29,9 +30,6 @@ typedef int tid_t;
 #define PRI_MIN 0	   /* Lowest priority. */
 #define PRI_DEFAULT 31 /* Default priority. */
 #define PRI_MAX 63	   /* Highest priority. */
-
-#define FDT_PAGE_CNT 3
-#define FDT_SIZE FDT_PAGE_CNT *(PGSIZE / 8) // file descriptor size: 128
 
 /* A kernel thread or user process.
  *
@@ -114,29 +112,19 @@ struct thread
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4; /* Page map level 4 */
 
-	/* deny write in process */
-	struct file *running_file;
+	/* Denying Writes to Executables */
+	struct file *running_file; // 이 프로세스가 실행 중인 파일
 
-	/* system-call : filesys */
-	struct file **fdt;
-	int nextfd;
-
-	/* System call : exit() */
-	int exit_status;
-	struct semaphore sema_exit;
-
-	/* System call : wait() */
-	struct semaphore sema_wait;
-
-	/* System call : fork() */
-	struct semaphore sema_fork;
-
-	struct intr_frame parent_if;
-	struct list children;
-	struct list_elem child_elem;
-
-	/* System call : dub2() */
-	struct list dub2_fds;
+	/* System Calls */
+	int exit_status;			 // 프로세스 종료 상태
+	struct semaphore sema_wait;	 // 부모가 자식의 종료를 기다리는 semaphore
+	struct semaphore sema_exit;	 // 자식이 종료 후 부모의 종료를 기다리는 semaphore
+	struct semaphore sema_fork;	 // fork시 동기화를 위한 semaphore
+	struct intr_frame parent_if; // user context를 전달하기 위한 intr_frame
+	struct list children;		 // 자식 프로세스 목록
+	struct list_elem child_elem; // 자식 프로세스 목록 elem
+	struct list fd_pool;		 // 파일 디스크립터 테이블
+	int nextfd;					 // 다음 할당될 fd
 
 #endif
 #ifdef VM

@@ -5,19 +5,6 @@
 
 struct inode;
 
-#define FD_STDIN 0x10000
-#define FD_STDOUT 0x10001
-
-#define FD_CHECK1(fd) (((fd) < FDT_SIZE) && ((fd) >= 0))
-#define FD_CHECK2(file) ((file) != NULL)
-
-#define is_file_descryptor(file, fd) (FD_CHECK1(fd) && FD_CHECK2(file))
-#define is_real_file(file) (((file) != FD_STDIN) && ((file) != FD_STDOUT))
-
-/* System call : dup2 */
-// void file_add_count(struct file *file);
-// unsigned get_file_count(struct file *file);
-
 /* Opening and closing files. */
 struct file *file_open(struct inode *);
 struct file *file_reopen(struct file *);

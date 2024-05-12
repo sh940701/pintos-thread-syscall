@@ -208,7 +208,7 @@ void lock_acquire(struct lock *lock)
 	/* #2 Priority Scheduling : holder와 현재 쓰레드를 비교하여 현재가 더 클 시 priority 증여 */
 	struct thread *holder = lock->holder;
 	struct thread *curr = thread_current();
-	if (holder != NULL)
+	if (holder)
 	{
 		curr->wait_on_lock = lock;
 		list_insert_ordered(&holder->donations, &curr->donation_elem, compare_donation_priority, NULL);
