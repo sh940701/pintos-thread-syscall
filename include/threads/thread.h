@@ -5,6 +5,9 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/interrupt.h"
+#include "threads/synch.h"
+#include "threads/vaddr.h"
+#include "userprog/syscall.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -21,7 +24,7 @@ enum thread_status
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
 typedef int tid_t;
-#define TID_ERROR ((tid_t)-1) /* Error value for tid_t. */
+#define TID_ERROR ((tid_t) - 1) /* Error value for tid_t. */
 
 /* Thread priorities. */
 #define PRI_MIN 0	   /* Lowest priority. */
@@ -108,6 +111,21 @@ struct thread
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4; /* Page map level 4 */
+
+	/* Denying Writes to Executables */
+	struct file *running_file; // 이 프로세스가 실행 중인 파일
+
+	/* System Calls */
+	int exit_status;			 // 프로세스 종료 상태
+	struct semaphore sema_wait;	 // 부모가 자식의 종료를 기다리는 semaphore
+	struct semaphore sema_exit;	 // 자식이 종료 후 부모의 종료를 기다리는 semaphore
+	struct semaphore sema_fork;	 // fork시 동기화를 위한 semaphore
+	struct intr_frame parent_if; // user context를 전달하기 위한 intr_frame
+	struct list children;		 // 자식 프로세스 목록
+	struct list_elem child_elem; // 자식 프로세스 목록 elem
+	struct list fd_pool;		 // 파일 디스크립터 테이블
+	int nextfd;					 // 다음 할당될 fd
+
 #endif
 #ifdef VM
 	/* Table for whole virtual memory owned by thread. */

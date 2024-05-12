@@ -10,6 +10,7 @@
 #include "threads/palloc.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "filesys/file.h"
 #include "intrinsic.h"
 #ifdef USERPROG
 #include "userprog/process.h"
@@ -191,6 +192,10 @@ tid_t thread_create(const char *name, int priority,
 	init_thread(t, name, priority);
 	tid = t->tid = allocate_tid();
 
+#ifdef USERPROG
+	/* 자식프로세스 목록에 t 추가 */
+	list_push_back(&thread_current()->children, &t->child_elem);
+#endif
 	/* Call the kernel_thread if it scheduled.
 	 * Note) rdi is 1st argument, and rsi is 2nd argument. */
 	t->tf.rip = (uintptr_t)kernel_thread;
@@ -430,7 +435,23 @@ init_thread(struct thread *t, const char *name, int priority)
 	/* #2 Priority Scheduling : priority donation에 필요한 변수 초기화 */
 	t->init_priority = priority; // init priority
 	t->wait_on_lock = NULL;		 // waiting lock
-	list_init(&t->donations);	 // donated thread list
+
+	list_init(&t->donations); // donated thread list
+
+#ifdef USERPROG
+
+	/* DEny Write on Executables */
+	t->running_file = NULL; // running file
+
+	/* System call */
+	t->exit_status = 0;			 // 프로세스 종료상태 초기화
+	sema_init(&t->sema_wait, 0); // 부모가 자식의 종료를 기다리는 semaphore
+	sema_init(&t->sema_exit, 0); // 자식이 종료 후 부모의 종료를 기다리는 semaphore
+	sema_init(&t->sema_fork, 0); // fork시 동기화를 위한 semaphore
+	list_init(&t->children);	 // 자식 프로세스 목록
+	list_init(&t->fd_pool);		 // 파일 디스크립터 테이블
+
+#endif
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
