@@ -4,8 +4,8 @@
 #include <list.h>
 
 /* stdin,stdout 구분값 */
-#define FD_STDIN 0xFD00001
-#define FD_STDOUT 0xFD00002
+#define FD_STDIN 0xFD00000 + 1
+#define FD_STDOUT 0xFD00000 + 2
 
 /* 파일 디스크립터 최대 갯수 */
 #define FD_MAX 128
@@ -29,8 +29,8 @@ struct file_elem
 struct fd_elem
 {
     struct file_elem *ref_file_elem;
-    int fd;
     struct list_elem elem;
+    int fd;
 };
 
 void syscall_init(void);
