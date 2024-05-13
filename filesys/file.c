@@ -9,27 +9,7 @@ struct file
 	struct inode *inode; /* File's inode. */
 	off_t pos;			 /* Current position. */
 	bool deny_write;	 /* Has file_deny_write() been called? */
-	unsigned count;		 /* System call */
 };
-
-/* System call : dup2 */
-unsigned get_file_count(struct file *file)
-{
-	if (file != NULL)
-	{
-		return file->count;
-	}
-	return -1;
-}
-
-/* System call : dup2 */
-void file_add_count(struct file *file)
-{
-	if (file != NULL)
-	{
-		file->count++;
-	}
-}
 
 /* Opens a file for the given INODE, of which it takes ownership,
  * and returns the new file.  Returns a null pointer if an
@@ -45,7 +25,6 @@ file_open(struct inode *inode)
 		file->inode = inode;
 		file->pos = 0;
 		file->deny_write = false;
-		file->count = 0;
 		return file;
 	}
 	else
@@ -75,7 +54,6 @@ file_duplicate(struct file *file)
 		nfile->pos = file->pos;
 		if (file->deny_write)
 			file_deny_write(nfile);
-		nfile->count = file->count;
 	}
 	return nfile;
 }
@@ -83,7 +61,7 @@ file_duplicate(struct file *file)
 /* Closes FILE. */
 void file_close(struct file *file)
 {
-	if (file != NULL && file->count <= 0)
+	if (file != NULL)
 	{
 		file_allow_write(file);
 		inode_close(file->inode);
