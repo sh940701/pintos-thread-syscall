@@ -47,7 +47,7 @@ process_init(void)
 		goto error;
 
 	fd_0 = register_fd(stdin, 0);  // stdin에 0번 fd 할당
-	fd_1 = register_fd(stdout, 1); // stdoutdp 1번 fd 할당
+	fd_1 = register_fd(stdout, 1); // stdout에 1번 fd 할당
 
 	if (!fd_0 || !fd_1)
 		goto error;
@@ -401,6 +401,7 @@ process_cleanup(void)
 	/* 기존 실행 파일 close */
 	struct thread *curr = thread_current();
 	file_close(curr->running_file);
+	curr->running_file = NULL;
 
 #ifdef VM
 	supplemental_page_table_kill(&curr->spt);
