@@ -449,7 +449,7 @@ init_thread(struct thread *t, const char *name, int priority)
 	sema_init(&t->sema_exit, 0); // 자식이 종료 후 부모의 종료를 기다리는 semaphore
 	sema_init(&t->sema_fork, 0); // fork시 동기화를 위한 semaphore
 	list_init(&t->children);	 // 자식 프로세스 목록
-	list_init(&t->fd_pool);		 // 파일 디스크립터 테이블
+	list_init(&t->fdt);			 // 파일 디스크립터 테이블
 
 #endif
 }

@@ -220,7 +220,7 @@ int open(const char *file_name)
 	struct file_elem *file_elem = NULL;
 	struct fd_elem *fd_elem = NULL;
 
-	if (list_size(&curr->fd_pool) > FD_MAX)
+	if (list_size(&curr->fdt) > FD_MAX)
 		return -1;
 
 	_file = filesys_open(file_name);
@@ -239,7 +239,7 @@ int open(const char *file_name)
 	curr->nextfd++;
 
 	file_elem->file = _file;
-	list_push_back(&curr->fd_pool, &file_elem->elem);
+	list_push_back(&curr->fdt, &file_elem->elem);
 
 	return fd_elem->fd;
 
@@ -267,17 +267,17 @@ int read(int fd, void *buffer, unsigned size)
 {
 	check_address(buffer);
 
-	struct file *file = fd_get_file(fd);
+	struct file_elem *file_elem = fd_get_file_elem(fd);
 
 	/* stdout 경우 종료, stdin 경우 input_getc 반환 */
-	if (!file || file == FD_STDOUT)
+	if (!file_elem || file_elem->type == FD_STDOUT)
 		return -1;
-	if (file == FD_STDIN)
+	if (file_elem->type == FD_STDIN)
 		return input_getc();
 
 	/* 동기화를 위한 lock 사용 */
 	lock_acquire(&fd_lock);
-	int cnt = file_read(file, buffer, size);
+	int cnt = file_read(file_elem->file, buffer, size);
 	lock_release(&fd_lock);
 
 	return cnt;
@@ -287,11 +287,11 @@ int read(int fd, void *buffer, unsigned size)
  * fd의 파일의 filesize 반환*/
 int filesize(int fd)
 {
-	struct file *file = fd_get_file(fd);
+	struct file_elem *file_elem = fd_get_file_elem(fd);
 
 	/* stdin,stdout이 아니라면 file_length 반환 */
-	if (file && is_file(file))
-		return file_length(file);
+	if (file_elem && file_elem->file && file_elem->type == 0)
+		return file_length(file_elem->file);
 	else
 		return -1;
 }
@@ -302,34 +302,36 @@ int write(int fd, void *buffer, unsigned size)
 {
 	check_address(buffer);
 
-	struct file *file = fd_get_file(fd);
+	struct file_elem *file_elem = fd_get_file_elem(fd);
 
 	/* stdin일 경우 종료, stdout일 경우 putbuf*/
-	if (!file || file == FD_STDIN)
+	if (!file_elem || file_elem->type == FD_STDIN)
 		return -1;
-	if (file == FD_STDOUT)
+	if (file_elem->type == FD_STDOUT)
 	{
 		putbuf(buffer, size);
 		return size;
 	}
-
-	/* 동기화를 위한 lock 사용 */
-	lock_acquire(&fd_lock);
-	int cnt = file_write(file, buffer, size);
-	lock_release(&fd_lock);
-
-	return cnt;
+	if (file_elem->file)
+	{
+		/* 동기화를 위한 lock 사용 */
+		lock_acquire(&fd_lock);
+		int cnt = file_write(file_elem->file, buffer, size);
+		lock_release(&fd_lock);
+		return cnt;
+	}
+	return -1;
 }
 
 /* [System call] tell:
  * fd의 파일의 pos 반환 (커서 위치 반환)*/
 unsigned tell(int fd)
 {
-	struct file *file = fd_get_file(fd);
+	struct file_elem *file_elem = fd_get_file_elem(fd);
 
 	/* stdin,stdout이 아니라면 file_tell 반환 */
-	if (file && is_file(file))
-		return file_tell(file);
+	if (file_elem && file_elem->file && file_elem->type == 0)
+		return file_tell(file_elem->file);
 	else
 		return -1;
 }
@@ -341,11 +343,13 @@ void seek(int fd, unsigned position)
 	if (position < 0)
 		return;
 
-	struct file *file = fd_get_file(fd);
+	struct file_elem *file_elem = fd_get_file_elem(fd);
 
 	/* stdin,stdout이 아니라면 file_seek */
-	if (file && is_file(file))
-		file_seek(file, position);
+	if (file_elem && file_elem->file && file_elem->type == 0)
+	{
+		file_seek(file_elem->file, position);
+	}
 }
 
 /* [System call] dub2(extra):
@@ -396,18 +400,19 @@ struct file_elem *new_file_elem()
 	struct file_elem *file_elem = calloc(1, sizeof(struct file_elem));
 	if (file_elem == NULL)
 		return NULL;
-
+	file_elem->file = NULL;
+	file_elem->type = FD_FILE;
 	list_init(&file_elem->fd_list); // fd_list 초기화
 	return file_elem;
 }
 
-/* fd에 할당된 파일 반환 */
-struct file *fd_get_file(int fd)
+/* fd 반환 */
+struct file_elem *fd_get_file_elem(int fd)
 {
-	struct fd_elem *_fd = fd_find(fd); // fd_elem 탐색
-	if (!_fd)
+	struct fd_elem *fd_elem = fd_find(fd); // fd_elem 탐색
+	if (!fd_elem)
 		return NULL;
-	return _fd->ref_file_elem->file;
+	return fd_elem->ref_file_elem;
 }
 
 /* fd에 해당하는 fd_elem 구조체 반환 */
@@ -417,9 +422,9 @@ struct fd_elem *fd_find(int fd)
 		return NULL;
 
 	struct thread *curr = thread_current();
-	struct list *pool = &curr->fd_pool;
+	struct list *pool = &curr->fdt;
 	struct list_elem *p = list_begin(pool);
-	while (p != list_end(pool)) // fd_pool 내 file_elem을 순회
+	while (p != list_end(pool)) // fdt 내 file_elem을 순회
 	{
 		struct file_elem *_file = list_entry(p, struct file_elem, elem);
 		struct list *fd_list = &_file->fd_list;
@@ -457,9 +462,7 @@ void fd_close(struct fd_elem *fd_elem)
 		/* 참조하는 fd_elem이 없는 file_elem 제거 */
 		if (list_empty(&file_elem->fd_list))
 		{
-			if (is_file(file_elem->file))
-				file_close(file_elem->file);
-
+			file_close(file_elem->file);
 			list_remove(&file_elem->elem);
 			free(file_elem);
 		}
