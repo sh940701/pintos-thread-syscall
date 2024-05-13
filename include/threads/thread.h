@@ -123,7 +123,7 @@ struct thread
 	struct intr_frame parent_if; // user context를 전달하기 위한 intr_frame
 	struct list children;		 // 자식 프로세스 목록
 	struct list_elem child_elem; // 자식 프로세스 목록 elem
-	struct list fd_pool;		 // 파일 디스크립터 테이블
+	struct list fdt;			 // 파일 디스크립터 테이블
 	int nextfd;					 // 다음 할당될 fd
 
 #endif

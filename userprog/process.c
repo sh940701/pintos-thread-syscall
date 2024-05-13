@@ -36,7 +36,7 @@ process_init(void)
 {
 	/* 파일 디스크립터 테이블 초기화 */
 	struct thread *curr = thread_current();
-	struct list *pool = &curr->fd_pool;
+	struct list *pool = &curr->fdt;
 
 	struct file_elem *stdin = new_file_elem();	// stdin file_elem 생성
 	struct file_elem *stdout = new_file_elem(); // stdout file_elem 생성
@@ -52,8 +52,8 @@ process_init(void)
 	if (!fd_0 || !fd_1)
 		goto error;
 
-	stdin->file = FD_STDIN;	  // stdin 파일 지정
-	stdout->file = FD_STDOUT; // stdout 파일 지정
+	stdin->type = FD_STDIN;	  // stdin type 지정
+	stdout->type = FD_STDOUT; // stdout type 지정
 
 	list_push_back(pool, &stdin->elem);	 // fd_pool에 stdin file_elem 추가
 	list_push_back(pool, &stdout->elem); // fd_pool에 stdout file_elem 추가
@@ -186,14 +186,14 @@ duplicate_pte(uint64_t *pte, void *va, void *aux)
 #endif
 
 /* 파일 디스크립터 테이블 삭제 */
-static void free_fd_pool()
+static void free_fdt()
 {
 	struct thread *curr = thread_current();
-	struct list *curr_pool = &curr->fd_pool;
-	struct list_elem *file_elem_p = list_begin(curr_pool);
+	struct list *curr_fdt = &curr->fdt;
+	struct list_elem *file_elem_p = list_begin(curr_fdt);
 
 	/* curr->fd_pool을 순회하면서 file_elem 탐색 */
-	while (file_elem_p != list_end(curr_pool))
+	while (file_elem_p != list_end(curr_fdt))
 	{
 		struct file_elem *file_elem = list_entry(file_elem_p, struct file_elem, elem);
 		struct list *fd_list = &file_elem->fd_list;
@@ -209,38 +209,36 @@ static void free_fd_pool()
 		}
 		/* file_elem 삭제 */
 		struct file *file = file_elem->file;
-		if (is_file(file))
-			file_close(file);
+		file_close(file);
 		file_elem_p = list_remove(file_elem_p);
 		free(file_elem);
 	}
 }
 
-/* parent_pool을 curr->fd_pool으로 복제 */
-static bool duplicate_fd_pool(struct list *parent_pool)
+/* parent_fdt을 curr->fdt로 복제 */
+static bool duplicate_fdt(struct list *parent_fdt)
 {
 	struct thread *curr = thread_current();
-	struct list *curr_pool = &curr->fd_pool;
-	struct list_elem *file_elem_p = list_begin(parent_pool);
+	struct list *curr_fdt = &curr->fdt;
+	struct list_elem *file_elem_p = list_begin(parent_fdt);
 
 	/* parent_pool을 순회하며 parent_file_elem 탐색 */
-	while (file_elem_p != list_end(parent_pool))
+	while (file_elem_p != list_end(parent_fdt))
 	{
 		struct file_elem *parent_file_elem = list_entry(file_elem_p, struct file_elem, elem);
 		struct file_elem *curr_file_elem = new_file_elem();
 		if (!curr_file_elem)
 			goto error;
 
-		list_push_back(curr_pool, &curr_file_elem->elem);
+		list_push_back(curr_fdt, &curr_file_elem->elem);
 
 		/* 새로운 file_elem에 parent_file_elem->file 복제하여 저장 */
-		if (is_file(parent_file_elem->file))
-			curr_file_elem->file = file_duplicate(parent_file_elem->file);
-		else
-			curr_file_elem->file = parent_file_elem->file;
+		if (parent_file_elem->file)
+			if (!(curr_file_elem->file = file_duplicate(parent_file_elem->file)))
+				goto error;
 
-		if (!curr_file_elem->file)
-			goto error;
+		if (parent_file_elem->type)
+			curr_file_elem->type = parent_file_elem->type;
 
 		struct list *parent_fd_list = &parent_file_elem->fd_list;
 		struct list *curr_fd_list = &curr_file_elem->fd_list;
@@ -297,7 +295,7 @@ __do_fork(void *aux)
 		goto error;
 #endif
 
-	if (!duplicate_fd_pool(&parent->fd_pool)) // 파일 디스크립터 테이블 복제
+	if (!duplicate_fdt(&parent->fdt)) // 파일 디스크립터 테이블 복제
 		goto error;
 
 	sema_up(&curr->sema_fork);
@@ -381,7 +379,7 @@ void process_exit(void)
 {
 	struct thread *curr = thread_current();
 	/* file descriptors close */
-	free_fd_pool();
+	free_fdt();
 	/* running file close*/
 	process_cleanup();
 
